@@ -1,0 +1,16 @@
+uv init --bare
+uv python install 3.14
+uv python pin 3.14
+
+uv add pymupdf
+uv add sentence-transformers
+uv add psycopg[binary]
+uv add pgvector
+uv add pydantic
+uv add polars
+uv add pyarrow
+uv add duckdb
+
+uv add --dev pytest ruff mypy
+
+uv sync
