@@ -5,14 +5,18 @@ Terminplan mit Kopfzeile), bleiben aber winzig, damit die Tests schnell und lesb
 """
 
 import io
+from collections.abc import Iterator
 from datetime import UTC, date, datetime
 
 import docx
 import openpyxl
+import psycopg
 import pymupdf
 import pytest
 
-from bauprojekt.models import DocType, Document
+from bauprojekt.config import DATABASE_URL
+from bauprojekt.db import init_schema
+from bauprojekt.models import DocType, Document, derive_id
 
 INGESTED_AT = datetime(2026, 9, 17, 8, 0, tzinfo=UTC).replace(tzinfo=None)
 
@@ -26,11 +30,13 @@ def make_document(
     document_date: date | None = date(2026, 9, 15),
 ) -> Document:
     """Document ohne Datei auf der Platte – die Extraktion arbeitet auf Bytes."""
+    source_path = f"{project_id}/ordner/{file_name}"
+    content_hash = "b" * 64
     return Document(
-        document_id="a" * 32,
-        content_hash="b" * 64,
+        document_id=derive_id(project_id, source_path, content_hash),
+        content_hash=content_hash,
         project_id=project_id,
-        source_path=f"{project_id}/ordner/{file_name}",
+        source_path=source_path,
         file_name=file_name,
         doc_type=doc_type,
         media_type=media_type,
@@ -96,3 +102,25 @@ def xlsx_bytes() -> bytes:
     puffer = io.BytesIO()
     workbook.save(puffer)
     return puffer.getvalue()
+
+
+@pytest.fixture
+def db() -> Iterator[psycopg.Connection]:
+    """Verbindung auf ein eigenes Schema, das nach jedem Test wieder verschwindet.
+
+    So laufen die Tests gegen dieselbe Datenbank wie die Anwendung, ohne deren Daten
+    anzufassen. Ist keine Datenbank erreichbar, wird der Test übersprungen.
+    """
+    try:
+        connection = psycopg.connect(DATABASE_URL, autocommit=True)
+    except psycopg.OperationalError as fehler:
+        pytest.skip(f"Keine Datenbank erreichbar: {fehler}")
+
+    with connection:
+        connection.execute("CREATE SCHEMA IF NOT EXISTS pytest_bauprojekt")
+        connection.execute("SET search_path TO pytest_bauprojekt, public")
+        init_schema(connection)
+        try:
+            yield connection
+        finally:
+            connection.execute("DROP SCHEMA pytest_bauprojekt CASCADE")

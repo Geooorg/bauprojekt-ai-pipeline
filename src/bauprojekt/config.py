@@ -26,3 +26,24 @@ in Phase 2 noch Überschrift und Kontext vorangestellt werden können.
 
 CHUNK_OVERLAP_CHARS = int(os.environ.get("BAUPROJEKT_CHUNK_OVERLAP_CHARS", "150"))
 """Überlappung zwischen benachbarten Chunks, damit ein Satz an der Grenze nicht verloren geht."""
+
+DATABASE_URL = os.environ.get(
+    "BAUPROJEKT_DATABASE_URL",
+    "postgresql://bauprojekt:bauprojekt@localhost:5432/bauprojekt",
+)
+"""Verbindung zu PostgreSQL. Zugangsdaten nur für die lokale Entwicklungsumgebung."""
+
+EMBEDDING_MODEL = os.environ.get(
+    "BAUPROJEKT_EMBEDDING_MODEL", "intfloat/multilingual-e5-base"
+)
+"""Mehrsprachiges Modell mit guter Qualität für deutsche Fachtexte.
+
+E5-Modelle erwarten Präfixe: ``passage: `` für gespeicherte Texte, ``query: `` für Suchanfragen.
+Ohne sie liegen Frage und Antwort im Vektorraum systematisch weiter auseinander.
+"""
+
+EMBEDDING_DIM = int(os.environ.get("BAUPROJEKT_EMBEDDING_DIM", "768"))
+"""Dimension des Modells. Muss zur Spalte ``vector(n)`` passen; ein Modellwechsel erzwingt neue Embeddings."""
+
+TEXT_SEARCH_CONFIG = os.environ.get("BAUPROJEKT_TEXT_SEARCH_CONFIG", "german")
+"""Postgres-Konfiguration für die Volltextsuche (Stemming, Stoppwörter)."""

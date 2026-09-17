@@ -34,3 +34,4 @@ module-name = "bauprojekt"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["db: braucht eine laufende PostgreSQL-Instanz (wird sonst übersprungen)"]
