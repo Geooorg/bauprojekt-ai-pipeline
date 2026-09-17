@@ -51,12 +51,17 @@ def pdf_bytes() -> bytes:
     """Zweiseitiges PDF mit Überschrift und Fließtext."""
     doc = pymupdf.open()
     seiten = [
-        "<h1>Projektstatusbericht September 2026</h1><p>Gesamtstatus: ROT.</p>",
-        "<h1>2. Termine</h1><p>Baugenehmigung Haus B: Antrag ruht.</p>",
+        "<h1>Projektstatusbericht September 2026</h1><p>Gesamtstatus: ROT. Auflagen offen.</p>",
+        (
+            "<p style='font-size:8pt'>Stadt Musterstadt · Bauaufsichtsamt · Rathausplatz 1</p>"
+            "<h1>2. Termine</h1><p>Baugenehmigung Haus B: Antrag ruht.</p>"
+        ),
     ]
     for html in seiten:
         page = doc.new_page(width=595, height=842)
-        page.insert_htmlbox(page.rect + (56, 56, -56, -56), html)
+        page.insert_htmlbox(
+            page.rect + (56, 56, -56, -56), html, css="h1 { font-size: 16pt; }"
+        )
     return doc.tobytes()
 
 

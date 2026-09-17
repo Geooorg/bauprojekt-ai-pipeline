@@ -61,6 +61,16 @@ def normalize_text(value: str) -> str:
     return unicodedata.normalize("NFC", value)
 
 
+def normalize_compatibility(value: str) -> str:
+    """Unicode auf NFKC vereinheitlichen – für Text aus Dokumenten, nicht für Dateinamen.
+
+    PDFs liefern Ligaturen als eigenes Zeichen: „Auﬂagen“ enthält U+FB02 statt „fl“. Eine
+    Suche nach „Auflagen“ fände das nicht, weder im Volltext noch als Zitat zum Kopieren.
+    NFKC löst solche Sonderformen auf (auch geschützte Leerzeichen und Kapitälchen).
+    """
+    return unicodedata.normalize("NFKC", value)
+
+
 def hash_file(path: Path) -> str:
     """SHA-256 des Dateiinhalts als Hex. Identität einer Dokumentversion."""
     digest = hashlib.sha256()

@@ -35,13 +35,27 @@ class TestPdf:
             "S. 2",
         ]
 
+    def test_ligaturen_werden_aufgeloest(self, pdf_bytes: bytes) -> None:
+        """PDFs liefern 'fl' oft als ein Zeichen (U+FB02). Eine Suche nach 'Auflagen' fände das nicht."""
+        segmente = extract(PDF_DOKUMENT, pdf_bytes)
+        assert "Auflagen" in segmente[0].text
+        assert "\ufb02" not in segmente[0].text
+        assert all("\ufb02" not in (s.heading or "") for s in segmente)
+
     def test_text_wird_uebernommen(self, pdf_bytes: bytes) -> None:
         segmente = extract(PDF_DOKUMENT, pdf_bytes)
         assert "Gesamtstatus: ROT." in segmente[0].text
         assert "Antrag ruht" in segmente[1].text
 
-    def test_ueberschrift_wird_erkannt(self, pdf_bytes: bytes) -> None:
-        assert extract(PDF_DOKUMENT, pdf_bytes)[1].heading == "2. Termine"
+    def test_ueberschrift_kommt_aus_der_schriftgroesse(self, pdf_bytes: bytes) -> None:
+        """Nicht die erste Zeile, sondern die größte Schrift der Seite.
+
+        Sonst wäre bei Behördenbriefen der Briefkopf die Überschrift – der landet
+        später im Embedding und im Volltextindex und verschlechtert die Treffer.
+        """
+        segmente = extract(PDF_DOKUMENT, pdf_bytes)
+        assert segmente[0].heading == "Projektstatusbericht September 2026"
+        assert segmente[1].heading == "2. Termine"
 
 
 class TestDocx:

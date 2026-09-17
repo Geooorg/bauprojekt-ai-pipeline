@@ -26,10 +26,13 @@ from docx.oxml.ns import qn
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
-from bauprojekt.models import Document, Segment, SegmentKind
+from bauprojekt.models import Document, Segment, SegmentKind, normalize_compatibility
 
 MAX_HEADING_LENGTH = 80
-"""Längere erste Zeilen sind Fließtext, keine Überschrift."""
+"""Längerer Text ist Fließtext, keine Überschrift."""
+
+MIN_HEADING_SIZE_RATIO = 1.15
+"""So viel größer als der Fließtext muss eine Zeile sein, um als Überschrift zu gelten."""
 
 MIN_HEADER_CELLS = 3
 """Ab so vielen gefüllten Zellen gilt eine Zeile im Tabellenblatt als Kopfzeile."""
@@ -54,7 +57,7 @@ def extract_pdf(document: Document, data: bytes) -> list[Segment]:
     segments: list[Segment] = []
     with pymupdf.open(stream=data, filetype="pdf") as pdf:
         for page_no, page in enumerate(pdf, start=1):
-            text = page.get_text("text").strip()
+            text = normalize_compatibility(page.get_text("text")).strip()
             if not text:
                 continue  # Leere oder rein grafische Seiten übergehen.
             segments.append(
@@ -64,7 +67,7 @@ def extract_pdf(document: Document, data: bytes) -> list[Segment]:
                     kind=SegmentKind.SEITE,
                     page_no=page_no,
                     locator=f"S. {page_no}",
-                    heading=first_line_as_heading(text),
+                    heading=heading_by_font_size(page),
                     text=text,
                 )
             )
@@ -78,18 +81,20 @@ def extract_docx(document: Document, data: bytes) -> list[Segment]:
     heading: str | None = None
     paragraphs: list[str] = []
     table_no = 0
+    section_no = 0
 
     def flush_paragraphs() -> None:
         """Gesammelte Absätze als ein Abschnitt ablegen."""
-        nonlocal paragraphs
+        nonlocal paragraphs, section_no
         text = "\n".join(paragraphs).strip()
         if text:
+            section_no += 1
             segments.append(
                 Segment.create(
                     document=document,
                     index=len(segments),
                     kind=SegmentKind.ABSCHNITT,
-                    locator=heading or f"Abschnitt {len(segments) + 1}",
+                    locator=heading or f"Abschnitt {section_no}",
                     heading=heading,
                     text=text,
                 )
@@ -189,13 +194,38 @@ def is_heading(paragraph: Paragraph) -> bool:
     )
 
 
-def first_line_as_heading(text: str) -> str | None:
-    """Erste nicht leere Zeile als Überschrift deuten, sofern sie kurz genug ist."""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped:
-            return stripped if len(stripped) <= MAX_HEADING_LENGTH else None
-    return None
+def heading_by_font_size(page: pymupdf.Page) -> str | None:
+    """Die Zeile mit der größten Schrift als Überschrift deuten.
+
+    Die erste Zeile taugt nicht: Bei Behördenschreiben steht dort der Briefkopf. Die
+    Schriftgröße trennt Überschrift und Fließtext zuverlässiger, weil sie die Auszeichnung
+    im Dokument selbst nutzt.
+    """
+    lines: list[tuple[float, str]] = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            size = max((span["size"] for span in line["spans"]), default=0.0)
+            text = normalize_compatibility(
+                "".join(span["text"] for span in line["spans"])
+            ).strip()
+            if text:
+                lines.append((size, text))
+
+    if not lines:
+        return None
+
+    largest_size, largest_text = max(lines, key=lambda entry: entry[0])
+    smaller_sizes = [size for size, _ in lines if size < largest_size]
+    if not smaller_sizes:
+        return None  # Alles gleich groß: keine Auszeichnung, also keine Überschrift.
+
+    body_size = max(smaller_sizes)
+    if (
+        largest_size < body_size * MIN_HEADING_SIZE_RATIO
+        or len(largest_text) > MAX_HEADING_LENGTH
+    ):
+        return None
+    return largest_text
 
 
 def format_cell(value: object) -> str:
