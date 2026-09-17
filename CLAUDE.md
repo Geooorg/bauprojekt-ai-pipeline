@@ -66,6 +66,29 @@ Arbeite phasenweise. Beginne keine neue Phase, bevor das Ergebnis der aktuellen 
 - Stack: LlamaIndex oder direkte Implementierung, LLM, Pydantic, FastAPI, strukturierte Report-Ausgabe.
 - Ergebnis: „Erstelle den Risikobericht für BAU-42." liefert Risiken mit Begründung, Maßnahmen und Originalquellen.
 
+## Projektstruktur (Phase 1)
+
+```
+src/bauprojekt/        # Paket (src-Layout, gebaut mit uv_build)
+├── config.py          # Pfade, Chunk-Größe (Umgebungsvariablen)
+├── models.py          # Pydantic-Modelle Document, Page, Chunk + Polars-Schemas
+├── extraction.py      # extract_pdf, extract_docx – reine Funktionen
+├── chunking.py        # chunk_pages – reine Funktionen
+└── pipeline.py        # Orchestrierung: lesen, hashen, bekannte Versionen überspringen, Parquet schreiben
+scripts/               # dünne CLIs, rufen nur das Paket auf
+├── generate_sample_documents.py   # synthetische Projekte BAU-42 / BAU-43
+└── ingest_documents.py
+tests/                 # pytest; kleine Beispieldateien in tests/fixtures/
+data/                  # nicht versioniert (nur .gitkeep)
+├── raw/<projekt-id>/  # Originale – nie verändern
+├── parquet/           # documents.parquet, pages.parquet, chunks.parquet
+└── generated/         # Reports (später)
+```
+
+Module für spätere Phasen (`embeddings.py`, `search.py` …) werden erst in der jeweiligen Phase angelegt.
+
+**Testdaten:** `data/raw/BAU-42` enthält bewusst eingebaute Sachverhalte, `BAU-43` dient als Kontrollprojekt für die Trennung der Projekte. Welche Sachverhalte wo stehen, beschreibt [docs/testdaten.md](docs/testdaten.md). Diese Datei ist der Maßstab für Tests und Auswertungen und muss bei Änderungen am Generator mitgepflegt werden.
+
 ## Konventionen
 
 - **Chunks tragen immer ihre Herkunft** (Projekt-ID wie `BAU-42`, Dokument, Version, Seite/Abschnitt, Chunk-Index). Ohne Quelle keine Quellenverweise in Phase 3.
