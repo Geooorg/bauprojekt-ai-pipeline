@@ -27,7 +27,8 @@ def make_document(
 ) -> Document:
     """Document ohne Datei auf der Platte – die Extraktion arbeitet auf Bytes."""
     return Document(
-        document_id="a" * 64,
+        document_id="a" * 32,
+        content_hash="b" * 64,
         project_id=project_id,
         source_path=f"{project_id}/ordner/{file_name}",
         file_name=file_name,

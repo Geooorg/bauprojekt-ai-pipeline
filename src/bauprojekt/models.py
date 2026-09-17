@@ -2,7 +2,9 @@
 
 Drei Ebenen:
 
-* ``Document`` – eine Version einer Datei. Identität ist der SHA-256 des Inhalts.
+* ``Document`` – eine Version einer Datei. Die Identität umfasst Projekt, Pfad und
+  Inhalts-Hash: Dieselbe Datei in zwei Projekten sind zwei Dokumente, sonst würde die
+  zweite übersprungen und ihr Inhalt läge nur unter dem ersten Projekt.
 * ``Segment``  – eine Einheit im Dokument: PDF-Seite, TOP eines Protokolls, Zeile im Terminplan.
   Ergebnis der Extraktion. Wird gespeichert, damit neu gechunkt werden kann, ohne erneut
   aus den Originalen zu lesen.
@@ -79,7 +81,10 @@ class Document(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    document_id: str = Field(description="SHA-256 des Dateiinhalts (Hex, 64 Zeichen)")
+    document_id: str = Field(
+        description="Abgeleitet aus Projekt, Pfad und Inhalts-Hash. Gleiche Datei am gleichen Ort = gleiche ID."
+    )
+    content_hash: str = Field(description="SHA-256 des Dateiinhalts (Hex, 64 Zeichen)")
     project_id: str = Field(description="Projektzuordnung, z. B. 'BAU-42'")
     source_path: str = Field(description="Pfad relativ zu data/raw, NFC-normalisiert")
     file_name: str
@@ -106,10 +111,13 @@ class Document(BaseModel):
         document_date: date | None,
         ingested_at: datetime,
     ) -> Self:
+        content_hash = hash_file(path)
+        source_path = normalize_text(path.relative_to(raw_root).as_posix())
         return cls(
-            document_id=hash_file(path),
+            document_id=derive_id(project_id, source_path, content_hash),
+            content_hash=content_hash,
             project_id=project_id,
-            source_path=normalize_text(path.relative_to(raw_root).as_posix()),
+            source_path=source_path,
             file_name=normalize_text(path.name),
             doc_type=doc_type,
             media_type=media_type,
@@ -242,6 +250,7 @@ def _schema(fields: Mapping[str, pl.DataType | DataTypeClass]) -> pl.Schema:
 DOCUMENT_SCHEMA = _schema(
     {
         "document_id": pl.String,
+        "content_hash": pl.String,
         "project_id": pl.String,
         "source_path": pl.String,
         "file_name": pl.String,

@@ -23,6 +23,19 @@ from bauprojekt.models import (
 INGESTED_AT = datetime(2026, 9, 17, 8, 0, tzinfo=UTC).replace(tzinfo=None)
 
 
+def erneut_einlesen(raw_root: Path, document: Document) -> Document:
+    """Dasselbe Dokument noch einmal einlesen, so wie es ein zweiter Durchlauf täte."""
+    return Document.from_file(
+        raw_root / document.source_path,
+        project_id=document.project_id,
+        raw_root=raw_root,
+        doc_type=document.doc_type,
+        media_type=document.media_type,
+        document_date=document.document_date,
+        ingested_at=document.ingested_at,
+    )
+
+
 @pytest.fixture
 def document(tmp_path: Path) -> Document:
     path = tmp_path / "BAU-42" / "statusberichte" / "statusbericht_2026-09.pdf"
@@ -53,25 +66,45 @@ def segment(document: Document) -> Segment:
 
 
 class TestModelle:
-    def test_dokument_id_ist_der_inhalts_hash(
+    def test_id_umfasst_projekt_pfad_und_inhalt(
         self, document: Document, tmp_path: Path
     ) -> None:
-        assert document.document_id == hash_file(tmp_path / document.source_path)
+        assert document.content_hash == hash_file(tmp_path / document.source_path)
+        assert document.document_id == derive_id(
+            document.project_id, document.source_path, document.content_hash
+        )
 
-    def test_gleicher_inhalt_ergibt_gleiche_id(
+    def test_gleiche_datei_am_gleichen_ort_ergibt_gleiche_id(
         self, document: Document, tmp_path: Path
     ) -> None:
-        kopie = tmp_path / "BAU-42" / "protokolle" / "andere_datei.pdf"
-        kopie.parent.mkdir(parents=True)
-        kopie.write_bytes(b"%PDF-1.7 Testinhalt")
-        assert hash_file(kopie) == document.document_id
+        """Voraussetzung für die inkrementelle Verarbeitung: erneutes Einlesen erkennt das Dokument."""
+        assert erneut_einlesen(tmp_path, document).document_id == document.document_id
 
     def test_geaenderter_inhalt_ergibt_neue_id(
         self, document: Document, tmp_path: Path
     ) -> None:
         pfad = tmp_path / document.source_path
         pfad.write_bytes(b"%PDF-1.7 Testinhalt, korrigiert")
-        assert hash_file(pfad) != document.document_id
+        assert erneut_einlesen(tmp_path, document).document_id != document.document_id
+
+    def test_gleicher_inhalt_in_zwei_projekten_bleibt_getrennt(
+        self, document: Document, tmp_path: Path
+    ) -> None:
+        """Sonst würde das zweite Projekt übersprungen und sein Inhalt läge nur unter dem ersten."""
+        pfad = tmp_path / "BAU-43" / "statusberichte" / "statusbericht_2026-09.pdf"
+        pfad.parent.mkdir(parents=True)
+        pfad.write_bytes(b"%PDF-1.7 Testinhalt")
+        anderes = Document.from_file(
+            pfad,
+            project_id="BAU-43",
+            raw_root=tmp_path,
+            doc_type=DocType.STATUSBERICHT,
+            media_type="application/pdf",
+            document_date=date(2026, 9, 15),
+            ingested_at=INGESTED_AT,
+        )
+        assert anderes.content_hash == document.content_hash
+        assert anderes.document_id != document.document_id
 
     def test_pfad_ist_relativ_und_nfc_normalisiert(self, tmp_path: Path) -> None:
         zerlegt = normalize_text("behördenkorrespondenz.pdf").replace("ö", "ö")

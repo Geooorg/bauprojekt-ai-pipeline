@@ -71,9 +71,9 @@ Arbeite phasenweise. Beginne keine neue Phase, bevor das Ergebnis der aktuellen 
 ```
 src/bauprojekt/        # Paket (src-Layout, gebaut mit uv_build)
 ├── config.py          # Pfade, Chunk-Größe (Umgebungsvariablen)
-├── models.py          # Pydantic-Modelle Document, Page, Chunk + Polars-Schemas
+├── models.py          # Pydantic-Modelle Document, Segment, Chunk + Polars-Schemas
 ├── extraction.py      # extract_pdf, extract_docx – reine Funktionen
-├── chunking.py        # chunk_pages – reine Funktionen
+├── chunking.py        # chunk_segments – reine Funktionen
 └── pipeline.py        # Orchestrierung: lesen, hashen, bekannte Versionen überspringen, Parquet schreiben
 scripts/               # dünne CLIs, rufen nur das Paket auf
 ├── generate_sample_documents.py   # synthetische Projekte BAU-42 / BAU-43
@@ -81,7 +81,7 @@ scripts/               # dünne CLIs, rufen nur das Paket auf
 tests/                 # pytest; kleine Beispieldateien in tests/fixtures/
 data/                  # nicht versioniert (nur .gitkeep)
 ├── raw/<projekt-id>/  # Originale – nie verändern
-├── parquet/           # documents.parquet, pages.parquet, chunks.parquet
+├── parquet/           # documents.parquet, segments.parquet, chunks.parquet
 └── generated/         # Reports (später)
 ```
 
