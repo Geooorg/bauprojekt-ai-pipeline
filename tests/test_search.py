@@ -260,3 +260,20 @@ class TestProjekttrennung:
             )
             == []
         )
+
+
+@pytest.mark.db
+class TestProjektIdInDerSuche:
+    @pytest.mark.parametrize("projekt", ["..", "", "BAU-42' OR '1'='1"])
+    def test_ungueltige_id_ist_ein_fehler_kein_leeres_ergebnis(
+        self, befuellt: psycopg.Connection, projekt: str
+    ) -> None:
+        """Ein leeres Ergebnis sähe aus wie 'nichts gefunden'. Ein Fehler zeigt, dass
+        die Anfrage selbst falsch war."""
+        with pytest.raises(ValueError, match="Projekt-ID"):
+            search(
+                befuellt,
+                project_id=projekt,
+                question="Baugenehmigung",
+                encoder=encoder_fuer(0),
+            )

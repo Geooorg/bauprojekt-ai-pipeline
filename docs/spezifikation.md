@@ -13,7 +13,7 @@ Das Dokument hat zwei Teile:
 
 ### 1.1 Datenmodelle (`bauprojekt.models`)
 
-Alle Modelle sind unveränderlich (`frozen=True`) und lehnen unbekannte Felder ab (`extra="forbid"`).
+Alle Modelle sind unveränderlich (`frozen=True`) und lehnen unbekannte Felder ab (`extra="forbid"`). `project_id` hat in allen Modellen den Typ `ProjectId`: eine Zeichenkette, die beim Erzeugen gegen `PROJECT_ID_PATTERN` = `[A-Z]{2,10}-[0-9]{1,6}` geprüft wird.
 
 | Modell | Felder |
 |---|---|
@@ -41,13 +41,14 @@ Chunk.citation() -> str   # "BAU-42 · statusbericht_2026-09.pdf · S. 2 · 01.0
 ```python
 ingest(*, raw_dir: Path = RAW_DIR, parquet_dir: Path = PARQUET_DIR,
        project_id: str | None = None, now: datetime | None = None) -> IngestResult
-# IngestResult(documents: int, skipped: int, segments: int, chunks: int)
+# IngestResult(documents: int, skipped: int, segments: int, chunks: int, rejected: list[str])
+# ValueError, wenn project_id angegeben ist und nicht dem Format entspricht
 ```
 
 | Eingabe | Herkunft | Regel |
 |---|---|---|
 | Datei | `data/raw/<PROJEKT-ID>/<ordner>/<datei>` | nur `.pdf`, `.docx`, `.xlsx`; andere werden übergangen |
-| `project_id` | **erster Ordner** unter `raw_dir` | `build_document`: `relative.parts[0]` |
+| `project_id` | **erster Ordner** unter `raw_dir` | Format `PROJECT_ID_PATTERN` (`BAU-42`); ungültig oder fehlend → Datei abgewiesen (`IngestResult.rejected`) |
 | `doc_type` | Unterordner | `protokolle`, `statusberichte`, `terminplan`, `genehmigungen`, sonst `unbekannt` |
 | `document_date` | Datum im Dateinamen | `2026-09-15` oder `2026-09` (→ Monatserster) |
 | Parameter `project_id` | Aufrufer | schränkt die **Suche nach Dateien** auf `raw_dir/<project_id>` ein |
@@ -141,6 +142,8 @@ Die Trennung ist heute **logisch, nicht physisch**. Alle Projekte liegen in dens
 | T7 | Beide Suchverfahren filtern in SQL. | `WHERE project_id = %(project_id)s` in beiden Abfragen; Parameterbindung, keine String-Verkettung | `search.vector_search`, `search.text_search` | `test_search.py::TestProjekttrennung::test_gleicher_vektor_anderes_projekt_bleibt_draussen` |
 | T8 | Die Zusammenführung mischt keine Projekte. | `reciprocal_rank_fusion` erhält nur die bereits gefilterten Listen | `search.search` | `test_search.py::TestProjekttrennung::test_anderes_projekt_findet_nur_seins` |
 | T9 | Ein unbekanntes Projekt liefert nichts statt alles. | Filter auf nicht existierenden Wert ergibt eine leere Menge | `search.py` | `test_search.py::TestProjekttrennung::test_unbekanntes_projekt_liefert_nichts` |
+| T11 | Nur Dateien in einem Ordner mit gültiger Projekt-ID werden eingelesen. | `project_of()` prüft den ersten Ordner gegen `PROJECT_ID_PATTERN`; alles andere landet in `IngestResult.rejected` | `pipeline.ingest`, `pipeline.project_of` | `test_pipeline.py::TestProjektIdAmEingang::test_lose_datei_wird_abgewiesen_und_gemeldet`, `…::test_ordner_mit_ungueltigem_namen_wird_abgewiesen` |
+| T12 | Jede Projekt-ID hat ein gültiges Format – am Eingang und im Modell. | `validate_project_id()` an jedem Eingang (`ingest`, `discover`, `index_chunks`, `fetch_known_chunk_ids`, `search`, `vector_search`, `text_search`); zusätzlich Typ `ProjectId` in `Document`, `Segment`, `Chunk` | `models.validate_project_id`, `models.ProjectId` | `test_models.py::TestProjektId` (14 Fälle, u. a. `".."`, `"lose_datei.pdf"`), `test_pipeline.py::…::test_pfadbestandteile_als_projekt_id_werden_abgelehnt`, `test_search.py::TestProjektIdInDerSuche` |
 | T10 | Die Trennung hält auch mit echten Daten. | Kontrollprojekt BAU-43 mit gleichen Begriffen, gleichen Dateinamen und gegenteiligem Sachstand | `docs/testdaten.md` | `evaluate_search.py` meldet „Treffer aus fremdem Projekt": 0 bei 20 Fragen |
 
 **Die Schlüsselprobe ist T7.** Die Tests legen in BAU-42 und BAU-43 Chunks mit **identischem Vektor** an. Selbst bei perfekter Ähnlichkeit erscheint der fremde Chunk nicht. Die Trennung beruht also auf dem Filter, nicht darauf, dass fremde Inhalte zufällig unähnlich sind.
@@ -151,18 +154,19 @@ Zwei der folgenden Punkte wurden beim Schreiben dieses Dokuments per Stichprobe 
 
 | # | Grenze | Nachweis | Folge | Vorschlag |
 |---|---|---|---|---|
-| G1 | **`project_id` wird nicht geprüft.** Eine Datei direkt unter `data/raw/` ohne Projektordner bekommt ihren eigenen Dateinamen als Projekt-ID. | Stichprobe: `data/raw/lose_datei.pdf` → `project_id = "lose_datei.pdf"` | Dokument landet in einem Scheinprojekt, keine Fehlermeldung | Format prüfen (z. B. `^[A-Z]+-\d+$`), Dateien ohne Projektordner ablehnen |
-| G2 | **Der Filter `project_id` in `ingest` lässt sich über Pfadbestandteile umgehen.** | Stichprobe: `ingest(project_id="..")` verarbeitet alle Projekte ohne Fehler | Der Aufrufer bekommt mehr als angefordert. Das betrifft nur das Einlesen, nicht die Suche, weil die Zuordnung weiter aus dem Pfad kommt. | dieselbe Formatprüfung wie G1 am Eingang von `ingest`, `index_chunks` und `search` |
+| G1 | ~~`project_id` wird nicht geprüft~~ **behoben**: Dateien ohne gültigen Projektordner werden abgewiesen und in `IngestResult.rejected` gemeldet | Stichprobe vorher: `data/raw/lose_datei.pdf` → `project_id = "lose_datei.pdf"`; nachher: abgewiesen | – | siehe T11 |
+| G2 | ~~Filter in `ingest` über Pfadbestandteile umgehbar~~ **behoben**: Formatprüfung an jedem Eingang | Stichprobe vorher: `ingest(project_id="..")` verarbeitete alle Projekte; nachher: `ValueError` | – | siehe T12 |
 | G3 | Optionale Projektfilter beim Einlesen und Einbetten | `ingest`, `index_chunks`, `fetch_known_chunk_ids`: `project_id=None` bedeutet „alle" | gewollt für Stapelverarbeitung, darf aber nie über eine Nutzerschnittstelle erreichbar sein | in einer API nur die Suchfunktionen freigeben |
 | G4 | Logische statt physischer Trennung | eine Tabelle, drei Parquet-Dateien für alle Projekte | ein Fehler in einer *künftigen* Abfrage ohne `WHERE project_id` würde Projekte mischen | PostgreSQL Row-Level Security mit `current_setting('app.project_id')`; Parquet nach Projekt partitionieren |
 | G5 | Keine Berechtigungen | Wer `search` aufruft, kann jede Projekt-ID übergeben | Die Produktvision verlangt „Projektgrenzen **und Berechtigungen**". Umgesetzt ist nur Ersteres. | in der `report-api` (Phase 3): Nutzer ↔ Projekt-Zuordnung prüfen, bevor `project_id` an `search` geht |
 | G6 | Entwicklerwerkzeug ohne Trennung | `scripts/query_parquet.py` führt beliebiges SQL über alle Projekte aus | unkritisch lokal, darf aber nie Teil eines Dienstes werden | ausdrücklich als Entwicklerwerkzeug belassen |
 
-**Einordnung:** Innerhalb der Suche, also dem Weg, auf dem Inhalte zu einem Nutzer oder später zum Sprachmodell gelangen, ist die Trennung durch Signaturen, SQL-Filter und Tests abgesichert (T6 bis T10). Die Lücken liegen am **Eingang** (G1, G2: welches Projekt ein Dokument bekommt) und in der **fehlenden Berechtigungsschicht** (G5). G1 und G2 lassen sich mit einer Formatprüfung an einer Stelle schließen. G5 gehört zu Phase 3.
+**Einordnung:** Innerhalb der Suche, also dem Weg, auf dem Inhalte zu einem Nutzer oder später zum Sprachmodell gelangen, ist die Trennung durch Signaturen, SQL-Filter und Tests abgesichert (T6 bis T10). Die Lücken am **Eingang** (G1, G2) sind durch die Formatprüfung geschlossen (T11, T12). Offen bleiben die **fehlende Berechtigungsschicht** (G5, Phase 3) und die nur logische Trennung (G4).
 
 ### 2.4 Regeln für neuen Code
 
 1. Jede Funktion, die Inhalte **liest und nach außen gibt**, nimmt `project_id: str` als Pflichtargument ohne Vorgabewert.
 2. Jede SQL-Abfrage auf `chunks` außerhalb von Wartungsfunktionen enthält `WHERE project_id = %(project_id)s`, mit Parameterbindung und nie per String-Verkettung.
 3. `project_id` wird nur in `pipeline.build_document` gesetzt und danach nur vererbt.
-4. Jede neue Suchfunktion bekommt einen Test nach dem Muster `test_gleicher_vektor_anderes_projekt_bleibt_draussen`, also mit absichtlich identischem Inhalt im Fremdprojekt.
+4. Jeder neue Eingang, an dem eine Projekt-ID ankommt, ruft `validate_project_id()` auf, bevor irgendetwas gelesen wird. Neue Modelle verwenden den Typ `ProjectId`, nicht `str`.
+5. Jede neue Suchfunktion bekommt einen Test nach dem Muster `test_gleicher_vektor_anderes_projekt_bleibt_draussen`, also mit absichtlich identischem Inhalt im Fremdprojekt.

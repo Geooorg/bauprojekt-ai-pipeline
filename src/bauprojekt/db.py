@@ -20,7 +20,7 @@ from pgvector.psycopg import register_vector
 
 from bauprojekt.compounds import compound_parts
 from bauprojekt.config import DATABASE_URL, EMBEDDING_DIM, TEXT_SEARCH_CONFIG
-from bauprojekt.models import Chunk
+from bauprojekt.models import Chunk, validate_project_id
 
 Embedding = Sequence[float]
 
@@ -180,6 +180,7 @@ def fetch_known_chunk_ids(
     if project_id is None:
         result = connection.execute("SELECT chunk_id FROM chunks")
     else:
+        validate_project_id(project_id)
         result = connection.execute(
             "SELECT chunk_id FROM chunks WHERE project_id = %s", (project_id,)
         )

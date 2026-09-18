@@ -5,7 +5,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from bauprojekt.models import (
     SCHEMAS,
@@ -18,6 +18,7 @@ from bauprojekt.models import (
     hash_file,
     normalize_text,
     to_frame,
+    validate_project_id,
 )
 
 INGESTED_AT = datetime(2026, 9, 17, 8, 0, tzinfo=UTC).replace(tzinfo=None)
@@ -177,3 +178,44 @@ class TestSchemas:
         assert gelesen.schema == SCHEMAS[Document]
         assert gelesen.row(0, named=True)["document_date"] == date(2026, 9, 15)
         assert gelesen.row(0, named=True)["doc_type"] == "statusbericht"
+
+
+class TestProjektId:
+    """Format der Projekt-ID – Grenzen G1 und G2 aus docs/spezifikation.md."""
+
+    @pytest.mark.parametrize(
+        "gueltig", ["BAU-42", "BAU-43", "HB-1", "BAUPROJEKT-123456"]
+    )
+    def test_gueltige_ids(self, gueltig: str) -> None:
+        assert validate_project_id(gueltig) == gueltig
+
+    @pytest.mark.parametrize(
+        "ungueltig",
+        [
+            "",
+            "..",  # G2: Pfadbestandteil
+            "BAU-42/..",
+            "../BAU-43",
+            "lose_datei.pdf",  # G1: Dateiname als Projekt
+            "bau-42",
+            "BAU42",
+            "BAU-42 ",
+            "BAU-",
+            "B-42",
+        ],
+    )
+    def test_ungueltige_ids(self, ungueltig: str) -> None:
+        with pytest.raises(ValueError, match="Projekt-ID"):
+            validate_project_id(ungueltig)
+
+    @pytest.mark.parametrize("modell", ["document", "segment"])
+    def test_modelle_lehnen_ungueltige_id_ab(
+        self, modell: str, document: Document, segment: Segment
+    ) -> None:
+        """Die Prüfung sitzt im Modell: Auch Code, der sie vergisst, kann keine
+        ungültige ID erzeugen."""
+        daten = (document if modell == "document" else segment).model_dump()
+        daten["project_id"] = "lose_datei.pdf"
+        klasse = Document if modell == "document" else Segment
+        with pytest.raises(ValidationError, match="project_id"):
+            klasse.model_validate(daten)

@@ -16,7 +16,8 @@ gegen Textrang), die **Ränge** schon. Reciprocal Rank Fusion vergibt je Liste
 
 ``project_id`` ist in jeder Funktion ein Pflichtargument ohne Vorgabe. Eine Suche über alle
 Projekte ist damit gar nicht formulierbar – die Projekttrennung hängt nicht davon ab, dass
-jemand daran denkt.
+jemand daran denkt. Jede Funktion prüft außerdem das Format der ID: Eine ungültige ID ist
+ein Fehler, kein leeres Ergebnis, das wie „nichts gefunden“ aussähe.
 """
 
 from collections.abc import Sequence
@@ -28,7 +29,7 @@ from bauprojekt.compounds import compound_parts
 from bauprojekt.config import TEXT_SEARCH_CONFIG
 from bauprojekt.db import CHUNK_COLUMNS
 from bauprojekt.embeddings import Encoder, embed_query
-from bauprojekt.models import Chunk
+from bauprojekt.models import Chunk, validate_project_id
 
 RRF_K = 60
 """Dämpfung der Rangfusion. 60 ist der Wert aus der Originalarbeit und gängiger Standard:
@@ -60,6 +61,7 @@ def search(
     candidates: int = CANDIDATES_PER_METHOD,
 ) -> list[SearchHit]:
     """Hybrid-Suche innerhalb eines Projekts."""
+    validate_project_id(project_id)
     by_vector = vector_search(
         connection,
         project_id=project_id,
@@ -100,6 +102,7 @@ def vector_search(
     ist ``1 - Abstand``. Ohne Index durchsucht Postgres alle Chunks des Projekts – exakt
     und bei dieser Datenmenge schnell genug.
     """
+    validate_project_id(project_id)
     rows = connection.execute(
         f"""
         SELECT {SELECT_CHUNK}, 1 - (embedding <=> %(query)s::vector) AS similarity
@@ -131,6 +134,7 @@ def text_search(
     Komposita der Frage werden wie beim Indizieren zerlegt: „Rohbauverzug“ sucht auch
     nach „Rohbau“ und „Verzug“.
     """
+    validate_project_id(project_id)
     rows = connection.execute(
         f"""
         WITH q AS (

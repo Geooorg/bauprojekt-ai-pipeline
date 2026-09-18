@@ -18,19 +18,45 @@ statt sie zu verdoppeln.
 """
 
 import hashlib
+import re
 import unicodedata
 from collections.abc import Mapping
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Self
+from typing import Annotated, Self
 
 import polars as pl
 from polars.datatypes import DataTypeClass
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 ID_LENGTH = 32
 """Hex-Zeichen abgeleiteter IDs. 32 Zeichen = 128 Bit, für Kollisionen praktisch ausreichend."""
+
+
+PROJECT_ID_PATTERN = re.compile(r"[A-Z]{2,10}-[0-9]{1,6}")
+"""Format der Projekt-ID: 2–10 Großbuchstaben, Bindestrich, 1–6 Ziffern (``BAU-42``).
+
+Die Projekt-ID ist die Grenze zwischen Kundendaten. Sie kommt aus einem Ordnernamen oder
+von einem Aufrufer – beides ungeprüfte Eingaben. Ohne Formatprüfung wurde eine lose Datei
+zum Scheinprojekt (``"lose_datei.pdf"``) und ``".."`` umging den Projektfilter beim
+Einlesen. Das Format schließt Pfadbestandteile, Leerzeichen und Anführungszeichen aus.
+"""
+
+
+def validate_project_id(project_id: str) -> str:
+    """Projekt-ID prüfen und unverändert zurückgeben; bei ungültigem Format ``ValueError``."""
+    if not PROJECT_ID_PATTERN.fullmatch(project_id):
+        raise ValueError(
+            f"Ungültige Projekt-ID {project_id!r}: erwartet Großbuchstaben, Bindestrich und "
+            "Ziffern, z. B. 'BAU-42'."
+        )
+    return project_id
+
+
+ProjectId = Annotated[str, AfterValidator(validate_project_id)]
+"""Projekt-ID mit Formatprüfung. In jedem Modell verwendet: Auch Code, der die Prüfung
+vergisst, kann kein Document, Segment oder Chunk mit ungültiger ID erzeugen."""
 
 
 class DocType(StrEnum):
@@ -95,7 +121,7 @@ class Document(BaseModel):
         description="Abgeleitet aus Projekt, Pfad und Inhalts-Hash. Gleiche Datei am gleichen Ort = gleiche ID."
     )
     content_hash: str = Field(description="SHA-256 des Dateiinhalts (Hex, 64 Zeichen)")
-    project_id: str = Field(description="Projektzuordnung, z. B. 'BAU-42'")
+    project_id: ProjectId = Field(description="Projektzuordnung, z. B. 'BAU-42'")
     source_path: str = Field(description="Pfad relativ zu data/raw, NFC-normalisiert")
     file_name: str
     doc_type: DocType
@@ -144,7 +170,7 @@ class Segment(BaseModel):
 
     segment_id: str
     document_id: str
-    project_id: str
+    project_id: ProjectId
     index: int = Field(description="Reihenfolge im Dokument, ab 0")
     kind: SegmentKind
     page_no: int | None = Field(
@@ -191,7 +217,7 @@ class Chunk(BaseModel):
     chunk_id: str
     segment_id: str
     document_id: str
-    project_id: str
+    project_id: ProjectId
     index: int = Field(description="Reihenfolge im Dokument, ab 0")
     text: str
     char_start: int = Field(

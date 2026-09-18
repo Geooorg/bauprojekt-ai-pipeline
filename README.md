@@ -64,7 +64,7 @@ Ausgabe eines zweiten Durchlaufs ohne neue Dokumente:
 data/raw/<PROJEKT-ID>/<ordner>/<datei>
 ```
 
-- `<PROJEKT-ID>` wird die `project_id`, z. B. `BAU-42`.
+- `<PROJEKT-ID>` wird die `project_id`, z. B. `BAU-42`. Format: 2–10 Großbuchstaben, Bindestrich, 1–6 Ziffern. Dateien, die nicht in einem solchen Ordner liegen, werden **abgewiesen** und am Ende des Laufs aufgelistet; die übrigen werden trotzdem eingelesen.
 - `<ordner>` bestimmt die Dokumentart: `protokolle`, `statusberichte`, `terminplan`, `genehmigungen`. Alles andere wird `unbekannt`.
 - Unterstützt werden `.pdf`, `.docx` und `.xlsx`. Andere Dateien werden stillschweigend übergangen.
 - Ein Datum im Dateinamen (`2026-09-15_...` oder `..._2026-09`) wird als `document_date` übernommen. Es ordnet Aussagen zeitlich ein und unterscheidet aktuelle von überholten.

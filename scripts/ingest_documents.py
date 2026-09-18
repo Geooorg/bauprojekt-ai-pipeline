@@ -30,6 +30,13 @@ def main() -> None:
         f"(bereits bekannt), {result.segments} Segmente, {result.chunks} Chunks."
     )
     print(f"Geschrieben nach {args.parquet_dir}")
+    if result.rejected:
+        print(
+            f"\nAbgewiesen – nicht in einem Projektordner wie data/raw/BAU-42/…"
+            f" ({len(result.rejected)}):"
+        )
+        for path in result.rejected:
+            print(f"  {path}")
 
 
 if __name__ == "__main__":

@@ -234,3 +234,51 @@ class TestIndexieren:
             connection=db, encoder=FakeEncoder(), parquet_dir=parquet_dir
         )
         assert ergebnis.embedded == 0
+
+
+class TestProjektIdAmEingang:
+    """G1 und G2 aus docs/spezifikation.md."""
+
+    def test_lose_datei_wird_abgewiesen_und_gemeldet(
+        self, raw_dir: Path, parquet_dir: Path, pdf_bytes: bytes
+    ) -> None:
+        """G1: Eine Datei ohne Projektordner wird kein Scheinprojekt."""
+        (raw_dir / "lose_datei.pdf").write_bytes(pdf_bytes)
+
+        ergebnis = ingest(raw_dir=raw_dir, parquet_dir=parquet_dir)
+
+        assert ergebnis.rejected == ["lose_datei.pdf"]
+        assert ergebnis.documents == 4  # die übrigen werden trotzdem eingelesen
+        assert set(lies(parquet_dir, "documents")["project_id"]) == {"BAU-42", "BAU-43"}
+
+    def test_ordner_mit_ungueltigem_namen_wird_abgewiesen(
+        self, raw_dir: Path, parquet_dir: Path, pdf_bytes: bytes
+    ) -> None:
+        ziel = raw_dir / "entwurf" / "statusberichte" / "bericht.pdf"
+        ziel.parent.mkdir(parents=True)
+        ziel.write_bytes(pdf_bytes)
+
+        ergebnis = ingest(raw_dir=raw_dir, parquet_dir=parquet_dir)
+
+        assert ergebnis.rejected == ["entwurf/statusberichte/bericht.pdf"]
+
+    @pytest.mark.parametrize("projekt", ["..", "BAU-42/..", "../raw"])
+    def test_pfadbestandteile_als_projekt_id_werden_abgelehnt(
+        self, raw_dir: Path, parquet_dir: Path, projekt: str
+    ) -> None:
+        """G2: Der Filter lässt sich nicht über '..' umgehen."""
+        with pytest.raises(ValueError, match="Projekt-ID"):
+            ingest(raw_dir=raw_dir, parquet_dir=parquet_dir, project_id=projekt)
+        assert not (parquet_dir / "documents.parquet").exists()
+
+    @pytest.mark.db
+    def test_index_chunks_prueft_die_projekt_id(
+        self, parquet_dir: Path, db: psycopg.Connection
+    ) -> None:
+        with pytest.raises(ValueError, match="Projekt-ID"):
+            index_chunks(
+                connection=db,
+                encoder=FakeEncoder(),
+                parquet_dir=parquet_dir,
+                project_id="..",
+            )

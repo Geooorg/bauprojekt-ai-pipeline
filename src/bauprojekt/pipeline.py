@@ -23,7 +23,17 @@ from bauprojekt.config import PARQUET_DIR, RAW_DIR
 from bauprojekt.db import fetch_known_chunk_ids, upsert_chunks
 from bauprojekt.embeddings import DEFAULT_BATCH_SIZE, Encoder, embed_chunks
 from bauprojekt.extraction import extract
-from bauprojekt.models import SCHEMAS, Chunk, DocType, Document, Segment, to_frame
+from bauprojekt.models import (
+    PROJECT_ID_PATTERN,
+    SCHEMAS,
+    Chunk,
+    DocType,
+    Document,
+    Segment,
+    normalize_text,
+    to_frame,
+    validate_project_id,
+)
 
 SUPPORTED_SUFFIXES = frozenset({".pdf", ".docx", ".xlsx"})
 
@@ -53,6 +63,8 @@ class IngestResult:
     skipped: int
     segments: int
     chunks: int
+    rejected: list[str]
+    """Dateien ohne gültigen Projektordner (Pfade relativ zu raw_dir). Nicht eingelesen."""
 
 
 @dataclass(frozen=True)
@@ -70,7 +82,13 @@ def ingest(
     project_id: str | None = None,
     now: datetime | None = None,
 ) -> IngestResult:
-    """Alle noch unbekannten Dokumente einlesen und die Parquet-Dateien fortschreiben."""
+    """Alle noch unbekannten Dokumente einlesen und die Parquet-Dateien fortschreiben.
+
+    Dateien, die nicht in einem Ordner mit gültiger Projekt-ID liegen, werden abgewiesen
+    und in ``IngestResult.rejected`` gemeldet – der Lauf bricht dafür nicht ab.
+    """
+    if project_id is not None:
+        validate_project_id(project_id)
     ingested_at = now or datetime.now(UTC).replace(tzinfo=None)
     known_ids = set(read_table(parquet_dir, "documents")["document_id"])
 
@@ -78,8 +96,14 @@ def ingest(
     segments: list[Segment] = []
     chunks: list[Chunk] = []
     skipped = 0
+    rejected: list[str] = []
 
     for path in discover(raw_dir, project_id):
+        relative = path.relative_to(raw_dir)
+        if project_of(relative) is None:
+            rejected.append(normalize_text(relative.as_posix()))
+            continue
+
         document = build_document(path, raw_dir=raw_dir, ingested_at=ingested_at)
         if document.document_id in known_ids:
             skipped += 1
@@ -100,11 +124,14 @@ def ingest(
         skipped=skipped,
         segments=len(segments),
         chunks=len(chunks),
+        rejected=rejected,
     )
 
 
 def discover(raw_dir: Path, project_id: str | None) -> list[Path]:
     """Unterstützte Dateien eines oder aller Projekte, in stabiler Reihenfolge."""
+    if project_id is not None:
+        validate_project_id(project_id)  # sonst würde ".." aus raw_dir herausführen
     root = raw_dir / project_id if project_id else raw_dir
     if not root.is_dir():
         return []
@@ -126,6 +153,18 @@ def build_document(path: Path, *, raw_dir: Path, ingested_at: datetime) -> Docum
         document_date=date_from_name(path.name),
         ingested_at=ingested_at,
     )
+
+
+def project_of(relative: Path) -> str | None:
+    """Projekt-ID aus dem ersten Ordner unter raw_dir – oder None, wenn es keinen gültigen gibt.
+
+    Eine Datei direkt unter raw_dir hat keinen Projektordner; ihr erster Pfadbestandteil
+    wäre der Dateiname.
+    """
+    if len(relative.parts) < 2:
+        return None
+    candidate = relative.parts[0]
+    return candidate if PROJECT_ID_PATTERN.fullmatch(candidate) else None
 
 
 def doc_type_for(relative: Path) -> DocType:
@@ -187,6 +226,8 @@ def index_chunks(
     Geschrieben wird je Stapel. Bricht ein Lauf ab, ist das Erledigte gespeichert, und der
     nächste Lauf setzt dort fort.
     """
+    if project_id is not None:
+        validate_project_id(project_id)
     frame = read_table(parquet_dir, "chunks")
     if project_id is not None:
         frame = frame.filter(pl.col("project_id") == project_id)
