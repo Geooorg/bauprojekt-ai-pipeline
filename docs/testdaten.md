@@ -51,3 +51,11 @@ Dieses Projekt prüft, ob die Projekte sauber getrennt bleiben. Es verwendet **d
 | `genehmigungen/baugenehmigung.pdf` | 1 Seite, Baugenehmigung **vollständig erteilt** am 02.03.2026 |
 
 **Zeichen für vermischte Projekte:** Eine Suche in BAU-42 liefert „Baugenehmigung vollständig erteilt“, „Prüfbericht Brandschutz liegt vor“, „Aufzug“ oder „N-02“. Oder eine Suche in BAU-43 liefert Treffer zu Haus B, N-07 oder Lindenhof.
+
+## Suchfragen für die Messung
+
+Die Testfragen mit ihren erwarteten Fundstellen stehen in [scripts/search_cases.py](../scripts/search_cases.py): 20 Fragen mit 77 Fundstellen. Sie sind nach Typ gruppiert (Umschreibung, Kompositum, exakter Begriff, Kontrolle BAU-43). Relevant ist eine Fundstelle, wenn sie die Frage selbst beantwortet oder unmittelbar belegt.
+
+```bash
+uv run python scripts/evaluate_search.py --k 10 --details
+```
