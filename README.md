@@ -197,6 +197,8 @@ src/bauprojekt/
 
 Der Datenfluss: `data/raw` → `extraction` → `chunking` → `data/parquet` → `embeddings` → PostgreSQL → `search`.
 
+Sequenzdiagramme (PlantUML): [docs/diagrams/pipeline.puml](docs/diagrams/pipeline.puml) für Einlesen und Einbetten, [docs/diagrams/search.puml](docs/diagrams/search.puml) für die Hybrid-Suche.
+
 Zwei Regeln erklären die meisten Entwurfsentscheidungen:
 
 1. **Jeder Chunk trägt seine Herkunft** (Projekt, Dokument, Version, Seite oder Abschnitt, Zeichenposition). Ein Treffer ist dadurch allein zitierfähig, ohne Verknüpfung mit anderen Tabellen.

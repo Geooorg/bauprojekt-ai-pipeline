@@ -1,0 +1,155 @@
+@startuml pipeline
+' Pipeline-Architektur: Originale -> Parquet (Phase 1) -> Embeddings in PostgreSQL (Phase 2)
+' Funktionsnamen entsprechen src/bauprojekt/*.py. Anzeige: IntelliJ-Plugin "PlantUML Integration"
+' oder: plantuml -tsvg docs/diagrams/pipeline.puml
+
+title Pipeline: Originaldokumente → Parquet → Embeddings in PostgreSQL
+
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 200
+skinparam BoxPadding 8
+autonumber "<b>00"
+
+actor "Entwickler" as dev
+
+box "Phase 1 – Einlesen" #F3F7FB
+  participant "scripts/\ningest_documents.py" as ingest_cli
+  participant "pipeline\n.ingest()" as ingest
+  participant "models\nDocument" as model
+  participant "extraction\n.extract()" as extract
+  participant "chunking\n.chunk_segments()" as chunking
+end box
+
+collections "data/raw/\n<PROJEKT>/<ordner>/" as raw
+database "data/parquet/\ndocuments · segments · chunks" as parquet
+
+box "Phase 2 – Einbetten" #F6F3FB
+  participant "scripts/\nembed_chunks.py" as embed_cli
+  participant "pipeline\n.index_chunks()" as index
+  participant "embeddings" as emb
+  participant "Encoder\nmultilingual-e5-base" as encoder
+  participant "db\n.upsert_chunks()" as db
+  participant "compounds\n.compound_parts()" as compounds
+end box
+
+database "PostgreSQL + pgvector\nTabelle chunks" as pg
+
+== Phase 1: Originale → Parquet ==
+
+dev -> ingest_cli : uv run python scripts/ingest_documents.py [--project BAU-42]
+ingest_cli -> ingest : ingest(raw_dir, parquet_dir, project_id)
+
+ingest -> parquet : read_table("documents")
+parquet --> ingest : bekannte document_ids
+note right of ingest
+  Inkrementell: Was schon in documents.parquet
+  steht, wird nicht noch einmal verarbeitet.
+end note
+
+ingest -> raw : discover(): *.pdf, *.docx, *.xlsx
+raw --> ingest : Pfade (sortiert)
+
+loop für jede Datei
+  ingest -> ingest : build_document()\n• project_id  = 1. Ordner (BAU-42)\n• doc_type    = Unterordner (protokolle → PROTOKOLL)\n• document_date = Datum im Dateinamen
+  ingest -> model : Document.from_file(path, …)
+  model -> raw : hash_file(): SHA-256 des Inhalts
+  model --> ingest : Document\ndocument_id = derive_id(Projekt, Pfad, Hash)
+
+  alt document_id bereits bekannt
+    ingest -> ingest : überspringen (skipped += 1)
+  else neue Datei oder neue Version
+    ingest -> raw : path.read_bytes()
+    note right of raw
+      Einziger Lesezugriff auf ein Original.
+      Originale werden nie verändert.
+    end note
+    raw --> ingest : Bytes
+    ingest -> extract : extract(document, bytes)
+    note right of extract
+      Reine Funktion auf Bytes – je nach Endung:
+      • PDF:  1 Seite = 1 Segment, Überschrift aus Schriftgröße, NFKC
+      • DOCX: Abschnitt je Überschrift, 1 TOP-Zeile = 1 Segment
+      • XLSX: Kopfzeile erkennen, 1 Zeile = 1 Segment
+      Tabellenzeilen als "Spalte: Wert"
+    end note
+    extract --> ingest : list[Segment]
+    ingest -> chunking : chunk_segments(document, segments)
+    note right of chunking
+      Reine Funktion:
+      • nie über Segmentgrenzen
+      • Tabellenzeilen nie geteilt
+      • Schnitt an Satzgrenzen, max. 1200 Zeichen,
+        150 Zeichen Überlappung
+      • Herkunft redundant im Chunk
+    end note
+    chunking --> ingest : list[Chunk]
+  end
+end
+
+ingest -> parquet : append_table() × 3\n(festes Polars-Schema)
+ingest --> ingest_cli : IngestResult(documents, skipped, segments, chunks)
+ingest_cli --> dev : "11 Dokumente verarbeitet, 0 übersprungen, 56 Chunks"
+
+== Phase 2: Parquet → Embeddings → PostgreSQL ==
+
+dev -> embed_cli : uv run python scripts/embed_chunks.py [--project] [--neu]
+embed_cli -> emb : load_encoder()
+emb -> encoder ** : SentenceTransformer(\n"intfloat/multilingual-e5-base")
+note right of encoder
+  PyTorch wird erst hier geladen.
+  Gewichte (~1,1 GB) aus ~/.cache/huggingface
+end note
+
+embed_cli -> pg : connect()
+
+opt --neu
+  embed_cli -> pg : reset_schema(): DROP TABLE chunks
+end
+
+embed_cli -> pg : init_schema()
+note right of pg
+  CREATE EXTENSION vector
+  CREATE TABLE chunks (… embedding vector(768),
+    compound_terms, text_search GENERATED …)
+  Veraltete Tabelle → RuntimeError "… --neu"
+end note
+
+embed_cli -> index : index_chunks(connection, encoder, parquet_dir, project_id)
+index -> parquet : read_table("chunks")
+parquet --> index : alle Chunks
+index -> pg : fetch_known_chunk_ids(project_id)
+pg --> index : bereits eingebettete chunk_ids
+index -> index : pending = Chunks ohne Eintrag in der Datenbank
+
+loop je Stapel à 32 Chunks
+  index -> emb : embed_chunks(batch)
+  emb -> emb : passage_text(chunk)\n"passage: " + Überschrift + "\\n" + Text
+  note right of emb
+    Überschrift nur in der Eingabe fürs Modell –
+    chunk.text bleibt wortgleich zum Dokument.
+  end note
+  emb -> encoder : encode(texte)
+  encoder --> emb : Vektoren (768 Dim., normalisiert)
+  emb -> emb : check_dimension()
+  emb --> index : [(Chunk, Vektor)]
+
+  index -> db : upsert_chunks(paare)
+  db -> compounds : compound_parts(Überschrift + Text)
+  compounds --> db : "bau genehmigung brandschutz …"
+  db -> pg : INSERT … ON CONFLICT (chunk_id) DO UPDATE
+  note right of pg
+    Postgres berechnet selbst:
+    text_search = to_tsvector('german',
+      heading || text || compound_terms)
+  end note
+  note left of db
+    Je Stapel gespeichert: Bricht ein Lauf ab,
+    setzt der nächste dort fort.
+  end note
+end
+
+index --> embed_cli : IndexResult(embedded, skipped)
+embed_cli --> dev : "56 Chunks eingebettet, 0 übersprungen – 10,3 s"
+
+@enduml

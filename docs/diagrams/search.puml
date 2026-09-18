@@ -1,0 +1,112 @@
+@startuml search
+' Hybrid-Suche: Vektorsuche + Volltextsuche, zusammengeführt per Reciprocal Rank Fusion.
+' Funktionsnamen entsprechen src/bauprojekt/search.py, embeddings.py, compounds.py.
+' Anzeige: IntelliJ-Plugin "PlantUML Integration" oder: plantuml -tsvg docs/diagrams/search.puml
+
+title Hybrid-Suche: "Welche Genehmigungen sind offen?" in BAU-42
+
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 220
+skinparam BoxPadding 8
+autonumber "<b>00"
+
+actor "Entwickler" as dev
+participant "scripts/\nsearch_documents.py" as cli
+participant "search\n.search()" as search
+
+box "Semantisch: Bedeutung" #F3F7FB
+  participant "embeddings\n.embed_query()" as emb
+  participant "Encoder\nmultilingual-e5-base" as encoder
+  participant "search\n.vector_search()" as vsearch
+end box
+
+box "Lexikalisch: Wörter" #FBF6F0
+  participant "search\n.text_search()" as tsearch
+  participant "compounds\n.compound_parts()" as compounds
+end box
+
+participant "search\n.reciprocal_rank_fusion()" as rrf
+database "PostgreSQL\nTabelle chunks" as pg
+
+dev -> cli : search_documents.py BAU-42 "Welche Genehmigungen sind offen?"
+cli -> emb : load_encoder()
+note right of cli
+  project_id ist Pflichtargument ohne Vorgabe –
+  eine projektübergreifende Suche ist nicht formulierbar.
+end note
+cli -> pg : connect()
+cli -> search : search(connection, project_id="BAU-42",\nquestion, encoder, limit=5)
+
+== 1. Vektorsuche: Was bedeutet die Frage? ==
+
+search -> emb : embed_query(question)
+emb -> emb : query_text()\n"query: Welche Genehmigungen sind offen?"
+note right of emb
+  E5-Präfixe: "query:" für Fragen,
+  "passage:" für gespeicherte Texte.
+  Ohne sie: schlechtere Treffer, aber kein Fehler.
+end note
+emb -> encoder : encode([text])
+encoder --> emb : Vektor (768 Dim., normalisiert)
+emb --> search : query_embedding
+
+search -> vsearch : vector_search(project_id, query_embedding, limit=30)
+vsearch -> pg : SELECT …, 1 - (embedding ~<=> :q) AS similarity\nWHERE project_id = 'BAU-42'\nORDER BY embedding ~<=> :q  LIMIT 30
+note right of pg
+  ~<=> = Cosinus-Abstand (pgvector).
+  Kein Index: exakte Suche über alle
+  Chunks des Projekts.
+end note
+pg --> vsearch : Zeilen + Ähnlichkeit (0,795 … 0,812)
+vsearch --> search : Rangliste A: [(Chunk, Ähnlichkeit)]
+
+== 2. Volltextsuche: Welche Wörter kommen vor? ==
+
+search -> tsearch : text_search(project_id, question, limit=30)
+tsearch -> compounds : compound_parts(question)
+note right of compounds
+  Zerlegt Komposita der Frage
+  (CharSplit, Schwelle 0,6):
+  "Rohbauverzug" → ergänzt Teile.
+  Hier: keine Komposita → ""
+end note
+compounds --> tsearch : Wortteile
+tsearch -> pg : plainto_tsquery('german', Frage + Teile)
+note right of pg
+  Stoppwörter entfernt, Stammformen gebildet:
+  'genehm' & 'off'
+  … dann & durch | ersetzt:
+  'genehm' | 'off'
+  (sonst müsste jedes Wort vorkommen)
+end note
+tsearch -> pg : SELECT …, ts_rank_cd(text_search, q)\nWHERE project_id = 'BAU-42' AND text_search @@ q\nORDER BY rank DESC  LIMIT 30
+note right of pg
+  text_search (berechnete Spalte) =
+  heading + text + compound_terms.
+  "Baugenehmigung" ist über den Teil
+  "genehmigung" auffindbar.
+end note
+pg --> tsearch : Zeilen + Textrang
+tsearch --> search : Rangliste B: [(Chunk, Rang)]
+
+== 3. Zusammenführen ==
+
+search -> rrf : reciprocal_rank_fusion([IDs aus A, IDs aus B], k=60)
+note right of rrf
+  Je Liste: Punkte = 1 / (60 + Rang)
+  Punkte beider Listen addiert.
+  Ränge statt Rohwerte – Cosinus-Ähnlichkeit
+  und Textrang sind nicht vergleichbar.
+  In beiden Listen weit oben → gewinnt.
+end note
+rrf --> search : {chunk_id: Punkte}
+search -> search : sortieren, erste 5 nehmen,\nrank_of() für beide Listen
+search --> cli : list[SearchHit]\n(chunk, score, vector_rank, text_rank)
+
+loop je Treffer
+  cli -> cli : chunk.citation()\n"BAU-42 · bauzeitenplan.xlsx · Bauzeitenplan, Zeile V07"
+end
+cli --> dev : Treffer mit Quelle, Punkten und Rängen\n"Punkte 0,0320 (Vektor 3 · Volltext 2)"
+
+@enduml
