@@ -17,9 +17,9 @@ Alle Modelle sind unveränderlich (`frozen=True`) und lehnen unbekannte Felder a
 
 | Modell | Felder |
 |---|---|
-| `Document` | `document_id: str`, `content_hash: str`, **`project_id: str`**, `source_path: str`, `file_name: str`, `doc_type: DocType`, `media_type: str`, `file_size: int`, `document_date: date \| None`, `ingested_at: datetime` |
-| `Segment` | `segment_id: str`, `document_id: str`, **`project_id: str`**, `index: int`, `kind: SegmentKind`, `page_no: int \| None`, `locator: str`, `heading: str \| None`, `text: str` |
-| `Chunk` | `chunk_id: str`, `segment_id: str`, `document_id: str`, **`project_id: str`**, `index: int`, `text: str`, `char_start: int`, `char_end: int`, `source_path: str`, `file_name: str`, `doc_type: DocType`, `document_date: date \| None`, `page_no: int \| None`, `locator: str`, `heading: str \| None` |
+| `Document` | `document_id: str`, `content_hash: str`, **`project_id: ProjectId`**, `source_path: str`, `file_name: str`, `doc_type: DocType`, `media_type: str`, `file_size: int`, `document_date: date \| None`, `ingested_at: datetime` |
+| `Segment` | `segment_id: str`, `document_id: str`, **`project_id: ProjectId`**, `index: int`, `kind: SegmentKind`, `page_no: int \| None`, `locator: str`, `heading: str \| None`, `text: str` |
+| `Chunk` | `chunk_id: str`, `segment_id: str`, `document_id: str`, **`project_id: ProjectId`**, `index: int`, `text: str`, `char_start: int`, `char_end: int`, `source_path: str`, `file_name: str`, `doc_type: DocType`, `document_date: date \| None`, `page_no: int \| None`, `locator: str`, `heading: str \| None` |
 | `SearchHit` (`bauprojekt.search`) | `chunk: Chunk`, `score: float`, `vector_rank: int \| None`, `text_rank: int \| None` |
 
 Erzeugt werden die Modelle nur über Fabrikmethoden. Diese übernehmen `project_id` vom übergeordneten Objekt:
