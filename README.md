@@ -5,6 +5,8 @@ Lernprojekt: Baudokumente einlesen, als Parquet speichern, semantisch durchsuche
 - Produktvision: [docs/produktvision.md](docs/produktvision.md)
 - Testdaten und die bekannte Wahrheit dazu: [docs/testdaten.md](docs/testdaten.md)
 - Arbeitsregeln, Phasen und Konventionen: [CLAUDE.md](CLAUDE.md)
+- Schnittstellen und Nachweis der Projekttrennung: [docs/spezifikation.md](docs/spezifikation.md)
+- Suchkomponente: [docs/postgres-vs-elasticsearch.md](docs/postgres-vs-elasticsearch.md)
 
 ## Voraussetzungen
 
