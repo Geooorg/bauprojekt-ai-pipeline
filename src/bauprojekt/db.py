@@ -5,8 +5,9 @@ Eine Tabelle ``chunks``. Die Herkunftsfelder stehen redundant darin, wie im Chun
 Treffer ist allein zitierfähig.
 
 ``text_search`` ist eine berechnete Spalte: Postgres pflegt sie selbst fort und stemmt mit
-der deutschen Konfiguration. Damit findet „Fristen“ auch „Frist“. Zusammen mit der
-Vektorsuche ergibt das die Hybrid-Suche in ``search.py``.
+der deutschen Konfiguration. Damit findet „Fristen“ auch „Frist“. Einbezogen werden
+Überschrift, Text und ``compound_terms`` – die Teile zusammengesetzter Wörter (siehe
+``compounds.py``). Zusammen mit der Vektorsuche ergibt das die Hybrid-Suche in ``search.py``.
 
 Kein Vektorindex: Bei einigen tausend Chunks ist die vollständige Suche exakt und schnell
 genug. Ein HNSW-Index liefert nur Näherungen und lohnt sich erst bei deutlich mehr Daten.
@@ -17,12 +18,13 @@ from collections.abc import Sequence
 import psycopg
 from pgvector.psycopg import register_vector
 
+from bauprojekt.compounds import compound_parts
 from bauprojekt.config import DATABASE_URL, EMBEDDING_DIM, TEXT_SEARCH_CONFIG
 from bauprojekt.models import Chunk
 
 Embedding = Sequence[float]
 
-COLUMNS = (
+CHUNK_COLUMNS = (
     "chunk_id",
     "segment_id",
     "document_id",
@@ -38,8 +40,13 @@ COLUMNS = (
     "page_no",
     "locator",
     "heading",
-    "embedding",
 )
+"""Spalten, die ein Chunk-Modell füllen – in der Reihenfolge der Tabelle."""
+
+COLUMNS = (*CHUNK_COLUMNS, "compound_terms", "embedding")
+"""Alle geschriebenen Spalten: der Chunk plus das, was nur der Suchindex braucht."""
+
+REQUIRED_COLUMNS = frozenset(COLUMNS) | {"text_search"}
 
 
 def connect(url: str = DATABASE_URL) -> psycopg.Connection:
@@ -50,9 +57,14 @@ def connect(url: str = DATABASE_URL) -> psycopg.Connection:
 
 
 def init_schema(connection: psycopg.Connection) -> None:
-    """Tabelle und Indizes anlegen. Mehrfaches Aufrufen ist unschädlich."""
+    """Tabelle und Indizes anlegen. Mehrfaches Aufrufen ist unschädlich.
+
+    Eine bestehende Tabelle mit veraltetem Aufbau wird nicht still weiterverwendet: Die
+    Suche liefe dann, nur ohne die fehlenden Spalten, und niemand merkte es.
+    """
     connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
     register_vector(connection)
+    check_existing_table(connection)
     connection.execute(f"""
         CREATE TABLE IF NOT EXISTS chunks (
             chunk_id      text PRIMARY KEY,
@@ -70,9 +82,13 @@ def init_schema(connection: psycopg.Connection) -> None:
             page_no       integer,
             locator       text NOT NULL,
             heading       text,
+            compound_terms text NOT NULL DEFAULT '',
             embedding     vector({EMBEDDING_DIM}),
             text_search   tsvector GENERATED ALWAYS AS (
-                to_tsvector('{TEXT_SEARCH_CONFIG}', coalesce(heading, '') || ' ' || text)
+                to_tsvector(
+                    '{TEXT_SEARCH_CONFIG}',
+                    coalesce(heading, '') || ' ' || text || ' ' || compound_terms
+                )
             ) STORED
         )
     """)
@@ -85,6 +101,31 @@ def init_schema(connection: psycopg.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS chunks_search_idx ON chunks USING gin (text_search)"
     )
+
+
+def check_existing_table(connection: psycopg.Connection) -> None:
+    """Prüfen, ob eine vorhandene Tabelle ``chunks`` zum aktuellen Aufbau passt."""
+    existing = {
+        row[0]
+        for row in connection.execute(
+            "SELECT column_name FROM information_schema.columns"
+            " WHERE table_name = 'chunks' AND table_schema = current_schema()"
+        ).fetchall()
+    }
+    if existing and not REQUIRED_COLUMNS <= existing:
+        missing = ", ".join(sorted(REQUIRED_COLUMNS - existing))
+        raise RuntimeError(
+            f"Tabelle chunks ist veraltet (fehlt: {missing}). Neu anlegen und alle Chunks neu "
+            "einbetten: uv run python scripts/embed_chunks.py --neu"
+        )
+
+
+def reset_schema(connection: psycopg.Connection) -> None:
+    """Tabelle löschen. Danach ``init_schema`` aufrufen und neu einbetten.
+
+    Unbedenklich, weil die Datenbank nur ein Suchindex ist: Die Quelle bleibt Parquet.
+    """
+    connection.execute("DROP TABLE IF EXISTS chunks")
 
 
 def upsert_chunks(
@@ -122,6 +163,7 @@ def upsert_chunks(
             chunk.page_no,
             chunk.locator,
             chunk.heading,
+            compound_parts(f"{chunk.heading or ''} {chunk.text}"),
             list(embedding),
         )
         for chunk, embedding in items

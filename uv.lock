@@ -106,6 +106,7 @@ name = "bauprojekt-ai-pipeline"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "compound-split" },
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "pgvector" },
@@ -130,6 +131,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "compound-split", specifier = ">=1.0.2" },
     { name = "duckdb", specifier = ">=1.5.5" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "pgvector", specifier = ">=0.5.0" },
@@ -186,6 +188,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+]
+
+[[package]]
+name = "compound-split"
+version = "1.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/e2/35961725c69e542f12917a48899cf3a4820a1d8399f4d5f90c6a59d0a48c/compound_split-1.0.2.tar.gz", hash = "sha256:862f782e6a528c110295b33dc37094338fadf5d825c75ef2614592b3dce3a658", size = 18927315, upload-time = "2020-10-08T10:46:36.484Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/86/c5b9faf27d65fad28d2218620a71046777ad54d5742e68e469a61e7c84cb/compound_split-1.0.2-py3-none-any.whl", hash = "sha256:68de08c7172694352e3638ec480207ec9f95ac84aad4a0051ba7199e4f195772", size = 19440103, upload-time = "2020-10-08T10:46:19.537Z" },
 ]
 
 [[package]]

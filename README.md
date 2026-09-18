@@ -117,7 +117,7 @@ uv run python scripts/embed_chunks.py                  # Chunks einbetten und na
 uv run python scripts/embed_chunks.py --project BAU-42
 ```
 
-Nur Chunks, die noch nicht in der Datenbank stehen, werden eingebettet. Nach einem Neuaufbau von Parquet (geänderte Extraktion oder Chunking) haben geänderte Chunks neue IDs und werden neu berechnet. Veraltete Einträge bleiben dabei in der Tabelle stehen; für einen sauberen Neuaufbau:
+Nur Chunks, die noch nicht in der Datenbank stehen, werden eingebettet. Nach einer Änderung am Tabellenaufbau meldet das Skript das selbst und verlangt `--neu`. Nach einem Neuaufbau von Parquet (geänderte Extraktion oder Chunking) haben geänderte Chunks neue IDs und werden neu berechnet. Veraltete Einträge bleiben dabei in der Tabelle stehen; für einen sauberen Neuaufbau:
 
 ```bash
 podman exec bauprojekt-postgres psql -U bauprojekt -d bauprojekt -c "TRUNCATE chunks"
@@ -159,6 +159,11 @@ Vor jedem Commit:
 uv run ruff format . && uv run ruff check . && uv run mypy src tests scripts && uv run pytest
 ```
 
+## Abhängigkeiten mit Besonderheiten
+
+- **`compound-split`** (Komposita-Zerlegung) steht unter **GPL-3.0**. Für ein privates Lernprojekt ohne Weitergabe ist das unproblematisch. Bei einer Weitergabe der Software gälte die GPL für das Gesamtwerk. Das Paket wird nur in `compounds.py` verwendet und ließe sich dort ersetzen, etwa durch Hunspell-Wörterbücher in Postgres.
+- **`sentence-transformers`** bringt PyTorch mit (rund 560 MB). Geladen wird es nur beim Einbetten, nicht in den Tests.
+
 ## Konfiguration
 
 Alle Werte stehen in [src/bauprojekt/config.py](src/bauprojekt/config.py) und lassen sich über Umgebungsvariablen überschreiben:
@@ -186,6 +191,7 @@ src/bauprojekt/
 ├── pipeline.py      # einziger Ort mit Dateisystemzugriff
 ├── db.py            # PostgreSQL + pgvector: Schema und Schreibzugriff
 ├── embeddings.py    # Texte und Fragen → Vektoren
+├── compounds.py     # Komposita zerlegen für die Volltextsuche (Baugenehmigung → bau, genehmigung)
 └── search.py        # Hybrid-Suche: Vektor + Volltext, Reciprocal Rank Fusion
 ```
 
@@ -205,4 +211,5 @@ Zwei Regeln erklären die meisten Entwurfsentscheidungen:
 | `podman compose` schlägt fehl | `podman machine start` prüfen. |
 | `denied: requested access to the resource is denied` beim Abrufen von MinIO | Das Image liegt nicht mehr auf Docker Hub; die Compose-Datei verweist auf `quay.io/minio/minio`. |
 | Extraktion liefert unerwartete Segmente | Mit DuckDB direkt in `segments` schauen (Dateiname steht in `documents`): `SELECT s.locator, s.heading, substr(s.text,1,200) FROM segments s JOIN documents d USING (document_id) WHERE d.file_name = '…'` |
+| `Tabelle chunks ist veraltet (fehlt: …)` | Der Tabellenaufbau hat sich geändert: `uv run python scripts/embed_chunks.py --neu`. Unbedenklich, die Quelle bleibt Parquet. |
 | `Modell liefert Dimension … erwartet …` | `BAUPROJEKT_EMBEDDING_DIM` passt nicht zum Modell oder zur Tabellenspalte. |

@@ -138,18 +138,22 @@ class TestVolltextsuche:
         )
         assert [c.chunk_id for c, _ in treffer] == [GENEHMIGUNG.chunk_id]
 
-    def test_zerlegt_keine_zusammengesetzten_woerter(
-        self, befuellt: psycopg.Connection
-    ) -> None:
-        """Bekannte Grenze: 'Genehmigungen' → 'genehm', 'Baugenehmigung' → 'baugenehm'.
-
-        Postgres stemmt, zerlegt aber keine Komposita. Dieser Test dokumentiert die Lücke,
-        die in der Hybrid-Suche die Vektorsuche schließt (siehe TestHybrid).
-        """
+    def test_findet_teil_eines_kompositums(self, befuellt: psycopg.Connection) -> None:
+        """Postgres allein: 'Genehmigungen' → 'genehm', 'Baugenehmigung' → 'baugenehm', kein
+        Treffer. Mit den zusätzlich indizierten Teilen ('bau genehmigung') klappt es."""
         treffer = text_search(
             befuellt, project_id="BAU-42", question="Genehmigungen", limit=5
         )
-        assert treffer == []
+        assert [c.chunk_id for c, _ in treffer] == [GENEHMIGUNG.chunk_id]
+
+    def test_kompositum_in_der_frage_wird_zerlegt(
+        self, befuellt: psycopg.Connection
+    ) -> None:
+        """'Bauantrag' steht nirgends – über den Teil 'Antrag' wird der Chunk trotzdem gefunden."""
+        treffer = text_search(
+            befuellt, project_id="BAU-42", question="Bauantrag", limit=5
+        )
+        assert GENEHMIGUNG.chunk_id in [c.chunk_id for c, _ in treffer]
 
     def test_nur_fuellwoerter_ergibt_nichts(self, befuellt: psycopg.Connection) -> None:
         assert (
@@ -191,10 +195,11 @@ class TestHybrid:
         assert GENEHMIGUNG.chunk_id in ids
         assert ROHBAU.chunk_id in ids
 
-    def test_vektor_schliesst_die_luecke_der_komposita(
+    def test_kompositum_von_beiden_verfahren_gefunden(
         self, befuellt: psycopg.Connection
     ) -> None:
-        """Der Volltext findet 'Baugenehmigung' über 'Genehmigungen' nicht – die Bedeutung schon."""
+        """Vor der Zerlegung fand nur die Vektorsuche 'Baugenehmigung' über 'Genehmigungen'.
+        Jetzt finden es beide – und die Fusion belohnt die Übereinstimmung."""
         treffer = search(
             befuellt,
             project_id="BAU-42",
@@ -202,7 +207,7 @@ class TestHybrid:
             encoder=encoder_fuer(0),
         )
         assert treffer[0].chunk.chunk_id == GENEHMIGUNG.chunk_id
-        assert treffer[0].text_rank is None
+        assert treffer[0].text_rank == 1
         assert treffer[0].vector_rank == 1
 
     def test_limit_wird_eingehalten(self, befuellt: psycopg.Connection) -> None:

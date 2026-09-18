@@ -6,9 +6,9 @@ Warum zwei Verfahren?
   „Der Antrag ruht“, obwohl kein Wort übereinstimmt. Sie ist aber unscharf bei genauen
   Begriffen – Aktenzeichen, Nachtragsnummern, Namen.
 * Die **Volltextsuche** findet genau diese Begriffe zuverlässig („N-07“, „BA-2026-0587“),
-  versteht aber keine Umschreibungen. Und sie zerlegt keine zusammengesetzten Wörter:
-  „Genehmigungen“ wird zu ``genehm``, „Baugenehmigung“ zu ``baugenehm`` – kein Treffer.
-  Im Deutschen ist das keine Randerscheinung, sondern der Normalfall.
+  versteht aber keine Umschreibungen. Zusammengesetzte Wörter zerlegt Postgres nicht;
+  deshalb werden ihre Teile zusätzlich indiziert und auch die Frage wird zerlegt
+  (siehe ``compounds.py``). „Genehmigungen“ findet so „Baugenehmigung“.
 
 Beide liefern eine Rangliste. Die Rohwerte sind nicht vergleichbar (Cosinus-Ähnlichkeit
 gegen Textrang), die **Ränge** schon. Reciprocal Rank Fusion vergibt je Liste
@@ -24,8 +24,9 @@ from dataclasses import dataclass
 
 import psycopg
 
+from bauprojekt.compounds import compound_parts
 from bauprojekt.config import TEXT_SEARCH_CONFIG
-from bauprojekt.db import COLUMNS
+from bauprojekt.db import CHUNK_COLUMNS
 from bauprojekt.embeddings import Encoder, embed_query
 from bauprojekt.models import Chunk
 
@@ -36,7 +37,6 @@ Er verhindert, dass ein einzelner Spitzenplatz in nur einer Liste alles andere �
 CANDIDATES_PER_METHOD = 30
 """So viele Kandidaten holt jedes Verfahren, bevor fusioniert wird."""
 
-CHUNK_COLUMNS = [column for column in COLUMNS if column != "embedding"]
 SELECT_CHUNK = ", ".join(CHUNK_COLUMNS)
 
 
@@ -127,6 +127,9 @@ def text_search(
     Deshalb wird das UND durch ODER ersetzt; die Rangfolge (``ts_rank_cd``) bevorzugt
     trotzdem Chunks, die mehr Wörter enthalten. Füllwörter wie „welche“ oder „sind“
     entfernt die deutsche Konfiguration vorab.
+
+    Komposita der Frage werden wie beim Indizieren zerlegt: „Rohbauverzug“ sucht auch
+    nach „Rohbau“ und „Verzug“.
     """
     rows = connection.execute(
         f"""
@@ -144,7 +147,7 @@ def text_search(
         """,
         {
             "config": TEXT_SEARCH_CONFIG,
-            "question": question,
+            "question": f"{question} {compound_parts(question)}",
             "project_id": project_id,
             "limit": limit,
         },

@@ -3,6 +3,7 @@ name = "bauprojekt-ai-pipeline"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "compound-split>=1.0.2",
     "duckdb>=1.5.5",
     "fastapi>=0.141.1",
     "pgvector>=0.5.0",
@@ -35,3 +36,7 @@ module-name = "bauprojekt"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["db: braucht eine laufende PostgreSQL-Instanz (wird sonst übersprungen)"]
+
+[[tool.mypy.overrides]]
+module = ["compound_split", "compound_split.*"]
+ignore_missing_imports = true  # Paket ohne Typinformationen; nur in bauprojekt.compounds verwendet

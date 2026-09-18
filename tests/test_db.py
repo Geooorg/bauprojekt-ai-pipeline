@@ -13,7 +13,12 @@ import pytest
 from conftest import make_document
 
 from bauprojekt.config import EMBEDDING_DIM
-from bauprojekt.db import fetch_known_chunk_ids, init_schema, upsert_chunks
+from bauprojekt.db import (
+    fetch_known_chunk_ids,
+    init_schema,
+    reset_schema,
+    upsert_chunks,
+)
 from bauprojekt.models import Chunk, DocType, Segment, SegmentKind
 
 pytestmark = pytest.mark.db
@@ -162,3 +167,36 @@ class TestProjekttrennung:
             ("BAU-42", "Baugenehmigung"),
         ).fetchall()
         assert treffer == [("Baugenehmigung Haus B ist nicht erteilt.",)]
+
+
+class TestKomposita:
+    def test_teile_werden_mitgespeichert(self, db: psycopg.Connection) -> None:
+        upsert_chunks(db, [(chunk("Die Baugenehmigung fehlt."), vektor(0.1))])
+        zeile = db.execute("SELECT compound_terms FROM chunks").fetchone()
+        assert zeile is not None
+        assert {"bau", "genehmigung"} <= set(zeile[0].split())
+
+    def test_teil_eines_kompositums_ist_findbar(self, db: psycopg.Connection) -> None:
+        """'Genehmigungen' → 'genehm' findet jetzt auch 'Baugenehmigung' über den Teil 'genehmigung'."""
+        upsert_chunks(db, [(chunk("Die Baugenehmigung fehlt."), vektor(0.1))])
+        treffer = db.execute(
+            "SELECT count(*) FROM chunks WHERE text_search @@ plainto_tsquery('german', %s)",
+            ("Genehmigungen",),
+        ).fetchone()
+        assert treffer == (1,)
+
+
+class TestSchemaVeraltet:
+    def test_alte_tabelle_wird_erkannt(self, db: psycopg.Connection) -> None:
+        """Eine Tabelle ohne compound_terms stillschweigend weiterzuverwenden hieße:
+        Die Suche läuft, die Komposita-Zerlegung aber nicht – und niemand merkt es."""
+        db.execute("DROP TABLE chunks")
+        db.execute("CREATE TABLE chunks (chunk_id text PRIMARY KEY)")
+        with pytest.raises(RuntimeError, match="--neu"):
+            init_schema(db)
+
+    def test_neu_anlegen_behebt_das(self, db: psycopg.Connection) -> None:
+        db.execute("DROP TABLE chunks")
+        db.execute("CREATE TABLE chunks (chunk_id text PRIMARY KEY)")
+        reset_schema(db)
+        init_schema(db)  # jetzt ohne Fehler
