@@ -75,9 +75,9 @@ compounds --> tsearch : Wortteile
 tsearch -> pg : plainto_tsquery('german', Frage + Teile)
 note right of pg
   Stoppwörter entfernt, Stammformen gebildet:
-  'genehm' & 'off'
+  → 'genehm' & 'off'
   … dann & durch | ersetzt:
-  'genehm' | 'off'
+  → 'genehm' | 'off'
   (sonst müsste jedes Wort vorkommen)
 end note
 tsearch -> pg : SELECT …, ts_rank_cd(text_search, q)\nWHERE project_id = 'BAU-42' AND text_search @@ q\nORDER BY rank DESC  LIMIT 30

@@ -93,7 +93,7 @@ ingest_cli --> dev : "11 Dokumente verarbeitet, 0 übersprungen, 56 Chunks"
 
 == Phase 2: Parquet → Embeddings → PostgreSQL ==
 
-dev -> embed_cli : uv run python scripts/embed_chunks.py [--project] [--neu]
+dev -> embed_cli : uv run python scripts/embed_chunks.py [~--project] [~--neu]
 embed_cli -> emb : load_encoder()
 emb -> encoder ** : SentenceTransformer(\n"intfloat/multilingual-e5-base")
 note right of encoder
@@ -103,7 +103,7 @@ end note
 
 embed_cli -> pg : connect()
 
-opt --neu
+opt Option "--neu"
   embed_cli -> pg : reset_schema(): DROP TABLE chunks
 end
 
