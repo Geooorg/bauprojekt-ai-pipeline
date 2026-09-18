@@ -14,7 +14,7 @@ import psycopg
 import pymupdf
 import pytest
 
-from bauprojekt.config import DATABASE_URL
+from bauprojekt.config import DATABASE_URL, EMBEDDING_DIM
 from bauprojekt.db import init_schema
 from bauprojekt.models import DocType, Document, derive_id
 
@@ -129,3 +129,42 @@ def db() -> Iterator[psycopg.Connection]:
             yield connection
         finally:
             connection.execute("DROP SCHEMA pytest_bauprojekt CASCADE")
+
+
+class FakeEncoder:
+    """Doppel für das Embedding-Modell: merkt sich die Eingaben, braucht weder Modell noch Torch.
+
+    Ohne ``vectors`` liefert es für jeden Text einen Vektor aus seiner Länge. Mit ``vectors``
+    lässt sich gezielt steuern, welcher Text wohin im Vektorraum fällt – nützlich, um die
+    Reihenfolge von Suchtreffern vorherzusagen.
+    """
+
+    def __init__(
+        self,
+        dimension: int = EMBEDDING_DIM,
+        vectors: dict[str, list[float]] | None = None,
+    ) -> None:
+        self.dimension = dimension
+        self.vectors = vectors or {}
+        self.calls: list[list[str]] = []
+
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        return [self.vector_for(text) for text in texts]
+
+    def vector_for(self, text: str) -> list[float]:
+        for fragment, vector in self.vectors.items():
+            if fragment in text:
+                return vector
+        return [float(len(text))] * self.dimension
+
+    @property
+    def eingaben(self) -> list[str]:
+        return [text for call in self.calls for text in call]
+
+
+def basis(position: int, dimension: int = EMBEDDING_DIM) -> list[float]:
+    """Einheitsvektor: 1.0 an einer Stelle, sonst 0. Zwei verschiedene sind orthogonal."""
+    vector = [0.0] * dimension
+    vector[position] = 1.0
+    return vector

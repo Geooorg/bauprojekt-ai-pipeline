@@ -108,6 +108,40 @@ Das Schema legt `bauprojekt.db.init_schema()` an, inklusive `CREATE EXTENSION ve
 podman exec -it bauprojekt-postgres psql -U bauprojekt -d bauprojekt
 ```
 
+## Suchen (Phase 2)
+
+Voraussetzung: Postgres läuft, die Dokumente sind eingelesen.
+
+```bash
+uv run python scripts/embed_chunks.py                  # Chunks einbetten und nach Postgres schreiben
+uv run python scripts/embed_chunks.py --project BAU-42
+```
+
+Nur Chunks, die noch nicht in der Datenbank stehen, werden eingebettet. Nach einem Neuaufbau von Parquet (geänderte Extraktion oder Chunking) haben geänderte Chunks neue IDs und werden neu berechnet. Veraltete Einträge bleiben dabei in der Tabelle stehen; für einen sauberen Neuaufbau:
+
+```bash
+podman exec bauprojekt-postgres psql -U bauprojekt -d bauprojekt -c "TRUNCATE chunks"
+uv run python scripts/embed_chunks.py
+```
+
+Suchen – die Projekt-ID ist Pflicht, eine projektübergreifende Suche gibt es bewusst nicht:
+
+```bash
+uv run python scripts/search_documents.py BAU-42 "Welche Genehmigungen sind offen?"
+uv run python scripts/search_documents.py BAU-42 "Nachtrag N-07" --limit 3 --volltext
+```
+
+Jeder Treffer zeigt Quelle, Punktzahl und den Rang in Vektor- und Volltextsuche. So ist nachvollziehbar, welches Verfahren ihn gefunden hat.
+
+Suchqualität gegen die bekannte Wahrheit aus [docs/testdaten.md](docs/testdaten.md) messen:
+
+```bash
+uv run python scripts/evaluate_search.py --k 5
+uv run python scripts/evaluate_search.py --k 10 --details
+```
+
+Gemessen wird der Recall@k je Frage, getrennt für Vektor-, Volltext- und Hybrid-Suche. Das ist der Maßstab für jede Änderung an Chunking, Modell oder Suche: erst messen, dann ändern, dann wieder messen.
+
 ## Tests
 
 ```bash
@@ -151,10 +185,11 @@ src/bauprojekt/
 ├── chunking.py      # Segmente → Chunks (reine Funktionen)
 ├── pipeline.py      # einziger Ort mit Dateisystemzugriff
 ├── db.py            # PostgreSQL + pgvector: Schema und Schreibzugriff
-└── embeddings.py    # Texte und Fragen → Vektoren
+├── embeddings.py    # Texte und Fragen → Vektoren
+└── search.py        # Hybrid-Suche: Vektor + Volltext, Reciprocal Rank Fusion
 ```
 
-Der Datenfluss: `data/raw` → `extraction` → `chunking` → `data/parquet` → `embeddings` → PostgreSQL.
+Der Datenfluss: `data/raw` → `extraction` → `chunking` → `data/parquet` → `embeddings` → PostgreSQL → `search`.
 
 Zwei Regeln erklären die meisten Entwurfsentscheidungen:
 

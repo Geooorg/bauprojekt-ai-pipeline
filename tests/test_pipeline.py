@@ -3,10 +3,12 @@
 from pathlib import Path
 
 import polars as pl
+import psycopg
 import pytest
+from conftest import FakeEncoder
 
 from bauprojekt.models import SCHEMAS, Chunk, Document, Segment
-from bauprojekt.pipeline import ingest
+from bauprojekt.pipeline import index_chunks, ingest
 
 
 @pytest.fixture
@@ -179,3 +181,56 @@ class TestRobustheit:
         ergebnis = ingest(raw_dir=leer, parquet_dir=parquet_dir)
         assert ergebnis.documents == 0
         assert lies(parquet_dir, "documents").height == 0
+
+
+@pytest.mark.db
+class TestIndexieren:
+    """Parquet → Embeddings → PostgreSQL."""
+
+    def test_alle_chunks_landen_in_der_datenbank(
+        self, raw_dir: Path, parquet_dir: Path, db: psycopg.Connection
+    ) -> None:
+        ingest(raw_dir=raw_dir, parquet_dir=parquet_dir)
+        ergebnis = index_chunks(
+            connection=db, encoder=FakeEncoder(), parquet_dir=parquet_dir
+        )
+
+        assert ergebnis.embedded == lies(parquet_dir, "chunks").height
+        assert db.execute("SELECT count(*) FROM chunks").fetchone() == (
+            ergebnis.embedded,
+        )
+
+    def test_zweiter_lauf_bettet_nichts_neu_ein(
+        self, raw_dir: Path, parquet_dir: Path, db: psycopg.Connection
+    ) -> None:
+        """Einbetten kostet Rechenzeit – bekannte Chunks werden übersprungen."""
+        ingest(raw_dir=raw_dir, parquet_dir=parquet_dir)
+        index_chunks(connection=db, encoder=FakeEncoder(), parquet_dir=parquet_dir)
+
+        encoder = FakeEncoder()
+        ergebnis = index_chunks(connection=db, encoder=encoder, parquet_dir=parquet_dir)
+
+        assert ergebnis.embedded == 0
+        assert ergebnis.skipped == lies(parquet_dir, "chunks").height
+        assert encoder.calls == []
+
+    def test_nur_ein_projekt(
+        self, raw_dir: Path, parquet_dir: Path, db: psycopg.Connection
+    ) -> None:
+        ingest(raw_dir=raw_dir, parquet_dir=parquet_dir)
+        index_chunks(
+            connection=db,
+            encoder=FakeEncoder(),
+            parquet_dir=parquet_dir,
+            project_id="BAU-43",
+        )
+        projekte = db.execute("SELECT DISTINCT project_id FROM chunks").fetchall()
+        assert projekte == [("BAU-43",)]
+
+    def test_ohne_parquet_kein_fehler(
+        self, parquet_dir: Path, db: psycopg.Connection
+    ) -> None:
+        ergebnis = index_chunks(
+            connection=db, encoder=FakeEncoder(), parquet_dir=parquet_dir
+        )
+        assert ergebnis.embedded == 0

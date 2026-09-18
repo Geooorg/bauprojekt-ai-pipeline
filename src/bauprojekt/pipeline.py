@@ -1,4 +1,4 @@
-"""Orchestrierung: Originale lesen, hashen, bekannte Versionen überspringen, Parquet schreiben.
+"""Orchestrierung: Originale → Parquet (``ingest``) und Parquet → PostgreSQL (``index_chunks``).
 
 Hier – und nur hier – wird auf das Dateisystem zugegriffen. Extraktion und Chunking bleiben
 reine Funktionen. Für den späteren Betrieb im Cluster ist damit genau dieses Modul die
@@ -16,9 +16,12 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import polars as pl
+import psycopg
 
 from bauprojekt.chunking import chunk_segments
 from bauprojekt.config import PARQUET_DIR, RAW_DIR
+from bauprojekt.db import fetch_known_chunk_ids, upsert_chunks
+from bauprojekt.embeddings import DEFAULT_BATCH_SIZE, Encoder, embed_chunks
 from bauprojekt.extraction import extract
 from bauprojekt.models import SCHEMAS, Chunk, DocType, Document, Segment, to_frame
 
@@ -50,6 +53,14 @@ class IngestResult:
     skipped: int
     segments: int
     chunks: int
+
+
+@dataclass(frozen=True)
+class IndexResult:
+    """Was ein Indexierungslauf bewirkt hat."""
+
+    embedded: int
+    skipped: int
 
 
 def ingest(
@@ -157,3 +168,40 @@ def append_table(parquet_dir: Path, name: str, items: list) -> None:  # type: ig
     parquet_dir.mkdir(parents=True, exist_ok=True)
     frame = pl.concat([read_table(parquet_dir, name), to_frame(items, TABLES[name])])  # type: ignore[arg-type]
     frame.write_parquet(parquet_dir / f"{name}.parquet")
+
+
+def index_chunks(
+    *,
+    connection: psycopg.Connection,
+    encoder: Encoder,
+    parquet_dir: Path = PARQUET_DIR,
+    project_id: str | None = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> IndexResult:
+    """Chunks aus Parquet einbetten und nach PostgreSQL schreiben – nur die noch unbekannten.
+
+    Parquet ist die Quelle, PostgreSQL der Suchindex. Deshalb liest dieser Schritt nie die
+    Originale: Wer das Chunking ändert, baut Parquet neu, und die neuen Chunks bekommen
+    neue IDs. Gerechnet wird nur für diese.
+
+    Geschrieben wird je Stapel. Bricht ein Lauf ab, ist das Erledigte gespeichert, und der
+    nächste Lauf setzt dort fort.
+    """
+    frame = read_table(parquet_dir, "chunks")
+    if project_id is not None:
+        frame = frame.filter(pl.col("project_id") == project_id)
+
+    known_ids = fetch_known_chunk_ids(connection, project_id=project_id)
+    pending = [
+        Chunk.model_validate(row)
+        for row in frame.iter_rows(named=True)
+        if row["chunk_id"] not in known_ids
+    ]
+
+    for start in range(0, len(pending), batch_size):
+        batch = pending[start : start + batch_size]
+        upsert_chunks(
+            connection, embed_chunks(batch, encoder=encoder, batch_size=batch_size)
+        )
+
+    return IndexResult(embedded=len(pending), skipped=frame.height - len(pending))

@@ -5,7 +5,7 @@ wird – Präfixe, Kontext, Stapelgröße –, nicht die Qualität des Modells.
 """
 
 import pytest
-from conftest import make_document
+from conftest import FakeEncoder, make_document
 
 from bauprojekt.config import EMBEDDING_DIM
 from bauprojekt.embeddings import embed_chunks, embed_query, passage_text, query_text
@@ -18,22 +18,6 @@ DOKUMENT = make_document(
 )
 
 DIMENSION = EMBEDDING_DIM
-
-
-class FakeEncoder:
-    """Doppel für SentenceTransformer: merkt sich die Aufrufe."""
-
-    def __init__(self, dimension: int = DIMENSION) -> None:
-        self.dimension = dimension
-        self.calls: list[list[str]] = []
-
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        self.calls.append(list(texts))
-        return [[float(len(text))] * self.dimension for text in texts]
-
-    @property
-    def eingaben(self) -> list[str]:
-        return [text for call in self.calls for text in call]
 
 
 def chunk(
