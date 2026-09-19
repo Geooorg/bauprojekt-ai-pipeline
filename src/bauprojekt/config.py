@@ -57,3 +57,12 @@ Beispiele: ``anthropic:claude-opus-5`` (braucht ``ANTHROPIC_API_KEY``) oder
 
 LLM_RETRIES = int(os.environ.get("BAUPROJEKT_LLM_RETRIES", "2"))
 """Wie oft das Modell eine Antwort mit ungültigen Quellen nachbessern darf, bevor abgebrochen wird."""
+
+LLM_TIMEOUT = float(os.environ.get("BAUPROJEKT_LLM_TIMEOUT", "1800"))
+"""Wartezeit auf eine Antwort in Sekunden. Die Vorgabe der Bibliothek (600 s) reicht lokal
+nicht: Bei ~10 Tokens/s dauert allein die Ausgabe eines Berichts 5–10 Minuten. Achtung:
+Nach einem Timeout wiederholt der HTTP-Client die Anfrage, und Ollama rechnet von vorn."""
+
+LLM_THINKING = os.environ.get("BAUPROJEKT_LLM_THINKING", "")
+"""Denken vor der Antwort: ``aus``, ``low``, ``medium``, ``high`` – leer = Vorgabe des Modells.
+Denken kann Zusammenhänge verbessern, vervielfacht aber lokal die Laufzeit."""

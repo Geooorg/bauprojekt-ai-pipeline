@@ -22,11 +22,11 @@ from pathlib import Path
 
 from pydantic_ai import UnexpectedModelBehavior
 
-from bauprojekt.config import GENERATED_DIR, LLM_MODEL
+from bauprojekt.config import GENERATED_DIR, LLM_MODEL, LLM_THINKING
 from bauprojekt.db import connect
 from bauprojekt.embeddings import load_encoder
 from bauprojekt.models import validate_project_id
-from bauprojekt.report import create_report
+from bauprojekt.report import THINKING_LEVELS, create_report, parse_thinking
 from bauprojekt.report_markdown import render_markdown
 
 
@@ -41,6 +41,12 @@ def main() -> None:
         help=f"Sprachmodell als anbieter:modell (Vorgabe: {LLM_MODEL})",
     )
     parser.add_argument(
+        "--denken",
+        choices=list(THINKING_LEVELS),
+        default=LLM_THINKING or None,
+        help="Denken vor der Antwort (Vorgabe: wie das Modell). 'aus' ist lokal viel schneller.",
+    )
+    parser.add_argument(
         "--ausgabe",
         type=Path,
         default=GENERATED_DIR,
@@ -49,13 +55,21 @@ def main() -> None:
     args = parser.parse_args()
     project_id = validate_project_id(args.project)
 
-    print(f"Risikobericht für {project_id} mit {args.modell} …", flush=True)
+    thinking = parse_thinking(args.denken or "")
+    print(
+        f"Risikobericht für {project_id} mit {args.modell}, Denken: {args.denken or 'Vorgabe'} …",
+        flush=True,
+    )
     encoder = load_encoder()
     started = datetime.now(UTC)
     try:
         with connect() as connection:
             report = create_report(
-                connection, project_id=project_id, encoder=encoder, model=args.modell
+                connection,
+                project_id=project_id,
+                encoder=encoder,
+                model=args.modell,
+                thinking=thinking,
             )
     except UnexpectedModelBehavior as error:
         # Das Modell hat auch nach allen Nachbesserungen ungültige Belege geliefert.
@@ -64,7 +78,8 @@ def main() -> None:
 
     target = args.ausgabe / project_id
     target.mkdir(parents=True, exist_ok=True)
-    stem = f"risikobericht_{started:%Y%m%d-%H%M}_{slug(args.modell)}"
+    suffix = f"_denken-{args.denken}" if args.denken else ""
+    stem = f"risikobericht_{started:%Y%m%d-%H%M}_{slug(args.modell)}{suffix}"
     markdown = target / f"{stem}.md"
     data = target / f"{stem}.json"
     markdown.write_text(render_markdown(report), encoding="utf-8")

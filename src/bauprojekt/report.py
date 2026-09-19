@@ -28,9 +28,11 @@ from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.messages import ModelMessage, ModelRequest, RetryPromptPart
 from pydantic_ai.models import Model
 from pydantic_ai.models.ollama import OllamaModel
+from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_ai.output import NativeOutput, OutputSpec
+from pydantic_ai.settings import ThinkingLevel
 
-from bauprojekt.config import LLM_MODEL, LLM_RETRIES
+from bauprojekt.config import LLM_MODEL, LLM_RETRIES, LLM_THINKING, LLM_TIMEOUT
 from bauprojekt.embeddings import Encoder
 from bauprojekt.models import Chunk, validate_project_id
 from bauprojekt.risks import RiskAnalysis, RiskCategory, RiskReport, RunStats
@@ -166,6 +168,12 @@ def collapse_whitespace(text: str) -> str:
     return " ".join(text.split())
 
 
+def is_ollama(model: Model | str) -> bool:
+    if isinstance(model, str):
+        return model.startswith("ollama:")
+    return isinstance(model, OllamaModel)
+
+
 def output_spec(model: Model | str) -> OutputSpec[RiskAnalysis]:
     """Wie das Modell das Schema füllt – je nach Anbieter.
 
@@ -175,18 +183,64 @@ def output_spec(model: Model | str) -> OutputSpec[RiskAnalysis]:
     Eine Grammatik beschränkt die Erzeugung auf gültiges JSON nach dem Schema. Die
     Belege prüft das nicht – das bleibt Aufgabe von ``check_sources``.
     """
-    is_ollama = (
-        model.startswith("ollama:")
-        if isinstance(model, str)
-        else isinstance(model, OllamaModel)
-    )
-    return NativeOutput(RiskAnalysis) if is_ollama else RiskAnalysis
+    return NativeOutput(RiskAnalysis) if is_ollama(model) else RiskAnalysis
 
 
-def build_agent(model: Model | str) -> Agent[Sources, RiskAnalysis]:
+THINKING_LEVELS: dict[str, ThinkingLevel] = {
+    "aus": False,
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+}
+
+
+def parse_thinking(value: str) -> ThinkingLevel | None:
+    """``"aus"`` → False, ``"high"`` → "high", ``""`` → None (Vorgabe des Modells)."""
+    if not value:
+        return None
+    if value not in THINKING_LEVELS:
+        raise ValueError(
+            f"Unbekannte Denkstufe {value!r}, erlaubt: {', '.join(THINKING_LEVELS)}"
+        )
+    return THINKING_LEVELS[value]
+
+
+DEFAULT_THINKING = parse_thinking(LLM_THINKING)
+"""Aus ``BAUPROJEKT_LLM_THINKING``; ungültige Werte fallen schon beim Import auf."""
+
+
+def model_settings(
+    model: Model | str, thinking: ThinkingLevel | None
+) -> OpenAIChatModelSettings:
+    """Wartezeit und Denkstufe für den Aufruf.
+
+    Die einheitliche Einstellung ``thinking`` reicht Pydantic AI nur weiter, wenn das
+    Modellprofil Denken kennt – sonst wird sie **stillschweigend verworfen**. Das Profil
+    für ``qwen3.8`` kennt es nicht. Für Ollama wird die Stufe deshalb direkt als
+    ``reasoning_effort`` gesetzt; das hat Vorrang vor dem Profil, und Ollama beachtet es.
+    """
+    settings = OpenAIChatModelSettings(timeout=LLM_TIMEOUT)
+    if thinking is None:
+        return settings
+    if is_ollama(model):
+        if thinking is False:
+            settings["openai_reasoning_effort"] = "none"
+        elif thinking is True:
+            settings["openai_reasoning_effort"] = "medium"
+        else:
+            settings["openai_reasoning_effort"] = thinking
+    else:
+        settings["thinking"] = thinking
+    return settings
+
+
+def build_agent(
+    model: Model | str, thinking: ThinkingLevel | None = None
+) -> Agent[Sources, RiskAnalysis]:
     agent = Agent(
         model,
         output_type=output_spec(model),
+        model_settings=model_settings(model, thinking),
         instructions=INSTRUCTIONS,
         deps_type=Sources,
         retries={"output": LLM_RETRIES},
@@ -211,6 +265,7 @@ def analyze(
     *,
     project_id: str,
     model: Model | str = LLM_MODEL,
+    thinking: ThinkingLevel | None = DEFAULT_THINKING,
     now: datetime | None = None,
 ) -> RiskReport:
     """Aus den gelieferten Chunks einen geprüften Risikobericht erzeugen.
@@ -243,7 +298,7 @@ def analyze(
 
     sources = Sources(project_id=project_id, chunks={c.chunk_id: c for c in chunks})
     started = time.perf_counter()
-    result = build_agent(model).run_sync(
+    result = build_agent(model, thinking).run_sync(
         f"Projekt {project_id}. Quellen:\n\n{format_sources(chunks)}",
         deps=sources,
     )
@@ -287,7 +342,8 @@ def create_report(
     project_id: str,
     encoder: Encoder,
     model: Model | str = LLM_MODEL,
+    thinking: ThinkingLevel | None = DEFAULT_THINKING,
 ) -> RiskReport:
     """Belege suchen und analysieren – der ganze Weg von der Datenbank zum Bericht."""
     chunks = collect_evidence(connection, project_id=project_id, encoder=encoder)
-    return analyze(chunks, project_id=project_id, model=model)
+    return analyze(chunks, project_id=project_id, model=model, thinking=thinking)

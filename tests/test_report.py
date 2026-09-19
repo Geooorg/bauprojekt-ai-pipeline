@@ -22,7 +22,9 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.output import NativeOutput
+from pydantic_ai.profiles import ModelProfile
 
+from bauprojekt.config import LLM_TIMEOUT
 from bauprojekt.db import upsert_chunks
 from bauprojekt.models import Chunk, DocType, Document, Segment, SegmentKind
 from bauprojekt.report import (
@@ -31,7 +33,9 @@ from bauprojekt.report import (
     check_sources,
     collect_evidence,
     format_sources,
+    model_settings,
     output_spec,
+    parse_thinking,
 )
 from bauprojekt.report_markdown import render_markdown, thousands
 from bauprojekt.risks import (
@@ -388,3 +392,48 @@ class TestMarkdown:
 
     def test_tausendertrennzeichen(self) -> None:
         assert thousands(12345) == "12.345"
+
+
+class TestEinstellungen:
+    def test_denkstufen(self) -> None:
+        assert parse_thinking("") is None
+        assert parse_thinking("aus") is False
+        assert parse_thinking("high") == "high"
+        with pytest.raises(ValueError, match="Denkstufe"):
+            parse_thinking("viel")
+
+    def test_wartezeit_und_denken_gehen_ans_modell(self) -> None:
+        gesehen: list[Any] = []
+
+        def modell(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            gesehen.append((info.model_settings, info.model_request_parameters))
+            return antwort()(messages, info)
+
+        denkfaehig = FunctionModel(modell, profile=ModelProfile(supports_thinking=True))
+        analyze([GENEHMIGUNG], project_id="BAU-42", model=denkfaehig, thinking=False)
+        settings, parameters = gesehen[0]
+        assert settings is not None
+        assert settings["timeout"] == LLM_TIMEOUT
+        # Pydantic AI reicht „thinking“ als Anfrageparameter weiter, nicht als Einstellung.
+        assert parameters.thinking is False
+
+    def test_ollama_bekommt_reasoning_effort(self) -> None:
+        """Das Qwen-Profil kennt kein Denken; die einheitliche Einstellung ginge verloren."""
+        assert (
+            model_settings("ollama:qwen3.8:27b-q4_K_M", False)[
+                "openai_reasoning_effort"
+            ]
+            == "none"
+        )
+        assert (
+            model_settings("ollama:qwen3.8:27b-q4_K_M", "high")[
+                "openai_reasoning_effort"
+            ]
+            == "high"
+        )
+        assert "openai_reasoning_effort" not in model_settings("ollama:x", None)
+
+    def test_andere_anbieter_bekommen_einheitliche_einstellung(self) -> None:
+        settings = model_settings("anthropic:claude-opus-5", "low")
+        assert settings.get("thinking") == "low"
+        assert "openai_reasoning_effort" not in settings
