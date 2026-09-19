@@ -88,7 +88,10 @@ def render_risk(number: int, risk: Risk, numbers: dict[str, int]) -> list[str]:
         "",
     ]
     for fact in risk.facts:
-        refs = "".join(f"[{numbers[e.chunk_id]}]" for e in fact.evidence)
+        # Mehrere Auszüge aus derselben Quelle ergeben einen Verweis, nicht „[7][7][7]“.
+        refs = "".join(
+            f"[{n}]" for n in dict.fromkeys(numbers[e.chunk_id] for e in fact.evidence)
+        )
         lines.append(f"- {fact.statement} {refs}")
     lines.append("")
     if risk.conclusions:

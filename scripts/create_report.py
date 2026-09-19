@@ -22,11 +22,16 @@ from pathlib import Path
 
 from pydantic_ai import UnexpectedModelBehavior
 
-from bauprojekt.config import GENERATED_DIR, LLM_MODEL, LLM_THINKING
+from bauprojekt.config import GENERATED_DIR, LLM_MODEL, LLM_THINKING, LLM_TIMEOUT
 from bauprojekt.db import connect
 from bauprojekt.embeddings import load_encoder
 from bauprojekt.models import validate_project_id
-from bauprojekt.report import THINKING_LEVELS, create_report, parse_thinking
+from bauprojekt.report import (
+    THINKING_LEVELS,
+    analyze,
+    collect_evidence,
+    parse_thinking,
+)
 from bauprojekt.report_markdown import render_markdown
 
 
@@ -60,17 +65,23 @@ def main() -> None:
         f"Risikobericht für {project_id} mit {args.modell}, Denken: {args.denken or 'Vorgabe'} …",
         flush=True,
     )
+    print("Lade Embedding-Modell und suche Belege …", flush=True)
     encoder = load_encoder()
     started = datetime.now(UTC)
     try:
         with connect() as connection:
-            report = create_report(
-                connection,
-                project_id=project_id,
-                encoder=encoder,
-                model=args.modell,
-                thinking=thinking,
+            chunks = collect_evidence(
+                connection, project_id=project_id, encoder=encoder
             )
+        # Der Modellaufruf dauert Minuten und gibt bis zum Ende nichts aus – daher hier ein Zeichen.
+        print(
+            f"{len(chunks)} Textstellen gesammelt, warte auf das Modell "
+            f"(Obergrenze {LLM_TIMEOUT / 60:.0f} min) …",
+            flush=True,
+        )
+        report = analyze(
+            chunks, project_id=project_id, model=args.modell, thinking=thinking
+        )
     except UnexpectedModelBehavior as error:
         # Das Modell hat auch nach allen Nachbesserungen ungültige Belege geliefert.
         print(f"Abgebrochen, kein Bericht: {error}", file=sys.stderr)

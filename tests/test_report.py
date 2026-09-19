@@ -390,6 +390,23 @@ class TestMarkdown:
         text = render_markdown(bericht)
         assert text.index("## 1. Schwer") < text.index("## 2. Leicht")
 
+    def test_mehrere_auszuege_einer_quelle_ein_verweis(self) -> None:
+        zwei_auszuege = risiko(
+            (GENEHMIGUNG.chunk_id, "Der Antrag ruht"),
+            (GENEHMIGUNG.chunk_id, "Prüfbericht fehlt"),
+        )
+        bericht = analyze(
+            [GENEHMIGUNG],
+            project_id="BAU-42",
+            model=FunctionModel(antwort(zwei_auszuege)),
+        )
+        text = render_markdown(bericht)
+        assert "- Der Antrag ruht. [1]\n" in text
+        assert "[1][1]" not in text
+        # Im Quellenverzeichnis bleiben beide Auszüge sichtbar.
+        assert "> „Der Antrag ruht“" in text
+        assert "> „Prüfbericht fehlt“" in text
+
     def test_tausendertrennzeichen(self) -> None:
         assert thousands(12345) == "12.345"
 
