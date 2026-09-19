@@ -47,3 +47,13 @@ EMBEDDING_DIM = int(os.environ.get("BAUPROJEKT_EMBEDDING_DIM", "768"))
 
 TEXT_SEARCH_CONFIG = os.environ.get("BAUPROJEKT_TEXT_SEARCH_CONFIG", "german")
 """Postgres-Konfiguration für die Volltextsuche (Stemming, Stoppwörter)."""
+
+LLM_MODEL = os.environ.get("BAUPROJEKT_LLM_MODEL", "anthropic:claude-opus-5")
+"""Sprachmodell für den Risikobericht, im Format ``anbieter:modell`` von Pydantic AI.
+
+Beispiele: ``anthropic:claude-opus-5`` (braucht ``ANTHROPIC_API_KEY``) oder
+``ollama:<modell>`` für ein lokales Modell. Der Anbieterwechsel ist nur diese Zeile.
+"""
+
+LLM_RETRIES = int(os.environ.get("BAUPROJEKT_LLM_RETRIES", "2"))
+"""Wie oft das Modell eine Antwort mit ungültigen Quellen nachbessern darf, bevor abgebrochen wird."""
