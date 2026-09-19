@@ -149,8 +149,8 @@ Gemessen wird der Recall@k je Frage, getrennt für Vektor-, Volltext- und Hybrid
 Voraussetzung: Die Chunks sind eingebettet (siehe oben), und ein Sprachmodell ist erreichbar, per API-Schlüssel oder [lokal](#sprachmodell-lokal-phase-3).
 
 ```bash
-uv run python scripts/create_report.py BAU-42                                    # Vorgabe: BAUPROJEKT_LLM_MODEL
-uv run python scripts/create_report.py BAU-42 --modell ollama:qwen3.8:27b-q4_K_M
+uv run python scripts/create_report.py BAU-42                                    # Vorgabe: Claude Sonnet 5, Denken medium
+uv run python scripts/create_report.py BAU-42 --modell ollama:qwen3.8:27b-q4_K_M --denken aus
 ```
 
 Ablauf:
@@ -198,7 +198,7 @@ Bericht mit dem lokalen Modell erzeugen:
 
 ```bash
 export OLLAMA_BASE_URL=http://127.0.0.1:11435/v1
-uv run python scripts/create_report.py BAU-42 --modell ollama:qwen3.8:27b-q4_K_M
+uv run python scripts/create_report.py BAU-42 --modell ollama:qwen3.8:27b-q4_K_M --denken aus
 ```
 
 **Wo die Modelle liegen:**
@@ -249,7 +249,10 @@ Alle Werte stehen in [src/bauprojekt/config.py](src/bauprojekt/config.py) und la
 | `BAUPROJEKT_EMBEDDING_MODEL` | `intfloat/multilingual-e5-base` | Embedding-Modell (ca. 1,1 GB beim ersten Laden) |
 | `BAUPROJEKT_EMBEDDING_DIM` | `768` | Muss zum Modell **und** zur Spalte `vector(n)` passen |
 | `BAUPROJEKT_TEXT_SEARCH_CONFIG` | `german` | Konfiguration der Volltextsuche in Postgres |
-| `BAUPROJEKT_LLM_MODEL` | `anthropic:claude-opus-5` | Sprachmodell für den Risikobericht, z. B. `ollama:qwen3.8:27b-q4_K_M` |
+| `BAUPROJEKT_LLM_MODEL` | `anthropic:claude-sonnet-5` | Sprachmodell für den Risikobericht, z. B. `ollama:qwen3.8:27b-q4_K_M` |
+| `BAUPROJEKT_LLM_THINKING` | `medium` | Denken vor der Antwort: `aus`, `low`, `medium`, `high`; per `--denken` überschreibbar. Lokal `aus` verwenden |
+| `BAUPROJEKT_LLM_TIMEOUT` | `1800` | Wartezeit auf eine Antwort in Sekunden |
+| `BAUPROJEKT_LLM_MAX_TOKENS` | `32000` | Obergrenze der Ausgabe inkl. Denken (Pydantic AI setzt für Anthropic sonst 4096) |
 | `BAUPROJEKT_LLM_RETRIES` | `2` | Nachbesserungen bei ungültigen Belegen, danach Abbruch |
 | `OLLAMA_BASE_URL` | – | Pflicht für `ollama:`-Modelle, hier `http://127.0.0.1:11435/v1` |
 | `ANTHROPIC_API_KEY` | – | Pflicht für `anthropic:`-Modelle; nie ins Repository |

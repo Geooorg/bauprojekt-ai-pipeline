@@ -48,10 +48,10 @@ EMBEDDING_DIM = int(os.environ.get("BAUPROJEKT_EMBEDDING_DIM", "768"))
 TEXT_SEARCH_CONFIG = os.environ.get("BAUPROJEKT_TEXT_SEARCH_CONFIG", "german")
 """Postgres-Konfiguration für die Volltextsuche (Stemming, Stoppwörter)."""
 
-LLM_MODEL = os.environ.get("BAUPROJEKT_LLM_MODEL", "anthropic:claude-opus-5")
+LLM_MODEL = os.environ.get("BAUPROJEKT_LLM_MODEL", "anthropic:claude-sonnet-5")
 """Sprachmodell für den Risikobericht, im Format ``anbieter:modell`` von Pydantic AI.
 
-Beispiele: ``anthropic:claude-opus-5`` (braucht ``ANTHROPIC_API_KEY``) oder
+Beispiele: ``anthropic:claude-sonnet-5`` (braucht ``ANTHROPIC_API_KEY``) oder
 ``ollama:<modell>`` für ein lokales Modell. Der Anbieterwechsel ist nur diese Zeile.
 """
 
@@ -63,9 +63,12 @@ LLM_TIMEOUT = float(os.environ.get("BAUPROJEKT_LLM_TIMEOUT", "1800"))
 nicht: Bei ~10 Tokens/s dauert allein die Ausgabe eines Berichts 5–10 Minuten. Achtung:
 Nach einem Timeout wiederholt der HTTP-Client die Anfrage, und Ollama rechnet von vorn."""
 
-LLM_THINKING = os.environ.get("BAUPROJEKT_LLM_THINKING", "")
+LLM_THINKING = os.environ.get("BAUPROJEKT_LLM_THINKING", "medium")
 """Denken vor der Antwort: ``aus``, ``low``, ``medium``, ``high`` – leer = Vorgabe des Modells.
-Denken kann Zusammenhänge verbessern, vervielfacht aber lokal die Laufzeit."""
+
+Vorgabe ``medium`` für Claude Sonnet 5 (adaptives Denken, Aufwand medium). Die Vorgabe gilt
+für jeden Anbieter: Lokale Modelle ausdrücklich mit ``--denken aus`` starten, sonst
+vervielfacht sich die Laufzeit (gemessen: ~10 Tokens/s, Denken ~4× mehr Ausgabe)."""
 
 LLM_MAX_TOKENS = int(os.environ.get("BAUPROJEKT_LLM_MAX_TOKENS", "32000"))
 """Obergrenze der Ausgabe je Anfrage, Denken eingeschlossen. Pydantic AI setzt für Anthropic
