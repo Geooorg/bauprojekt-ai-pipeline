@@ -16,3 +16,7 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Zugangsdaten (z. B. ANTHROPIC_API_KEY) nie versionieren
+.env
+.env.*

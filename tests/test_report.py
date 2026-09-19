@@ -24,7 +24,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.output import NativeOutput
 from pydantic_ai.profiles import ModelProfile
 
-from bauprojekt.config import LLM_TIMEOUT
+from bauprojekt.config import LLM_MAX_TOKENS, LLM_TIMEOUT
 from bauprojekt.db import upsert_chunks
 from bauprojekt.models import Chunk, DocType, Document, Segment, SegmentKind
 from bauprojekt.report import (
@@ -414,6 +414,7 @@ class TestEinstellungen:
         settings, parameters = gesehen[0]
         assert settings is not None
         assert settings["timeout"] == LLM_TIMEOUT
+        assert settings["max_tokens"] == LLM_MAX_TOKENS  # sonst 4096 bei Anthropic
         # Pydantic AI reicht „thinking“ als Anfrageparameter weiter, nicht als Einstellung.
         assert parameters.thinking is False
 

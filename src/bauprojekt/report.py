@@ -32,7 +32,13 @@ from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_ai.output import NativeOutput, OutputSpec
 from pydantic_ai.settings import ThinkingLevel
 
-from bauprojekt.config import LLM_MODEL, LLM_RETRIES, LLM_THINKING, LLM_TIMEOUT
+from bauprojekt.config import (
+    LLM_MAX_TOKENS,
+    LLM_MODEL,
+    LLM_RETRIES,
+    LLM_THINKING,
+    LLM_TIMEOUT,
+)
 from bauprojekt.embeddings import Encoder
 from bauprojekt.models import Chunk, validate_project_id
 from bauprojekt.risks import RiskAnalysis, RiskCategory, RiskReport, RunStats
@@ -212,14 +218,14 @@ DEFAULT_THINKING = parse_thinking(LLM_THINKING)
 def model_settings(
     model: Model | str, thinking: ThinkingLevel | None
 ) -> OpenAIChatModelSettings:
-    """Wartezeit und Denkstufe für den Aufruf.
+    """Wartezeit, Ausgabegrenze und Denkstufe für den Aufruf.
 
     Die einheitliche Einstellung ``thinking`` reicht Pydantic AI nur weiter, wenn das
     Modellprofil Denken kennt – sonst wird sie **stillschweigend verworfen**. Das Profil
     für ``qwen3.8`` kennt es nicht. Für Ollama wird die Stufe deshalb direkt als
     ``reasoning_effort`` gesetzt; das hat Vorrang vor dem Profil, und Ollama beachtet es.
     """
-    settings = OpenAIChatModelSettings(timeout=LLM_TIMEOUT)
+    settings = OpenAIChatModelSettings(timeout=LLM_TIMEOUT, max_tokens=LLM_MAX_TOKENS)
     if thinking is None:
         return settings
     if is_ollama(model):

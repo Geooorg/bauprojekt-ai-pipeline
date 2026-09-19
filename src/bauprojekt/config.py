@@ -66,3 +66,8 @@ Nach einem Timeout wiederholt der HTTP-Client die Anfrage, und Ollama rechnet vo
 LLM_THINKING = os.environ.get("BAUPROJEKT_LLM_THINKING", "")
 """Denken vor der Antwort: ``aus``, ``low``, ``medium``, ``high`` – leer = Vorgabe des Modells.
 Denken kann Zusammenhänge verbessern, vervielfacht aber lokal die Laufzeit."""
+
+LLM_MAX_TOKENS = int(os.environ.get("BAUPROJEKT_LLM_MAX_TOKENS", "32000"))
+"""Obergrenze der Ausgabe je Anfrage, Denken eingeschlossen. Pydantic AI setzt für Anthropic
+sonst 4096 – ein Bericht hat aber ~8.000 Tokens JSON und bräche mitten im Satz ab.
+Bezahlt wird nur, was tatsächlich erzeugt wird, nicht die Obergrenze."""
