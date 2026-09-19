@@ -50,7 +50,7 @@ ingest(*, raw_dir: Path = RAW_DIR, parquet_dir: Path = PARQUET_DIR,
 | Datei | `data/raw/<PROJEKT-ID>/<ordner>/<datei>` | nur `.pdf`, `.docx`, `.xlsx`; andere werden übergangen |
 | `project_id` | **erster Ordner** unter `raw_dir` | Format `PROJECT_ID_PATTERN` (`BAU-42`); ungültig oder fehlend → Datei abgewiesen (`IngestResult.rejected`) |
 | `doc_type` | Unterordner | `protokolle`, `statusberichte`, `terminplan`, `genehmigungen`, sonst `unbekannt` |
-| `document_date` | Datum im Dateinamen | `2026-09-15` oder `2026-09` (→ Monatserster) |
+| `document_date` | 1. vollständiges Datum im Dateinamen, 2. erster „Stand TT.MM.JJJJ“ im Inhalt, 3. Monat im Dateinamen (→ Monatserster) | `2026-09-15_…`, „Stand 15.09.2026“, `…_2026-09` |
 | Parameter `project_id` | Aufrufer | schränkt die **Suche nach Dateien** auf `raw_dir/<project_id>` ein |
 
 Reine Verarbeitungsfunktionen, ohne Dateisystemzugriff:

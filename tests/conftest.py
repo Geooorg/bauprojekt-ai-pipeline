@@ -99,7 +99,7 @@ def xlsx_bytes() -> bytes:
     sheet = workbook.active
     assert sheet is not None
     sheet.title = "Bauzeitenplan"
-    sheet.append(["Bauzeitenplan BAU-42", None, None, None])
+    sheet.append(["Bauzeitenplan BAU-42 – Stand 15.09.2026", None, None, None])
     sheet.append([])
     sheet.append(["ID", "Vorgang", "Verzug (AT)", "Status"])
     sheet.append(["V02", "Rohbau Haus A", 10, "verzögert"])

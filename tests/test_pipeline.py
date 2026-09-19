@@ -1,14 +1,20 @@
 """Tests für bauprojekt.pipeline (Durchlauf von Anfang bis Ende, inkrementelle Verarbeitung)."""
 
+from datetime import date
 from pathlib import Path
 
 import polars as pl
 import psycopg
 import pytest
-from conftest import FakeEncoder
+from conftest import FakeEncoder, make_document
 
-from bauprojekt.models import SCHEMAS, Chunk, Document, Segment
-from bauprojekt.pipeline import index_chunks, ingest
+from bauprojekt.models import SCHEMAS, Chunk, DocType, Document, Segment, SegmentKind
+from bauprojekt.pipeline import (
+    date_from_content,
+    index_chunks,
+    ingest,
+    with_content_date,
+)
 
 
 @pytest.fixture
@@ -282,3 +288,79 @@ class TestProjektIdAmEingang:
                 parquet_dir=parquet_dir,
                 project_id="..",
             )
+
+
+def seite(text: str, index: int = 0) -> Segment:
+    return Segment.create(
+        document=STATUSBERICHT,
+        index=index,
+        kind=SegmentKind.SEITE,
+        page_no=index + 1,
+        locator=f"S. {index + 1}",
+        text=text,
+    )
+
+
+STATUSBERICHT = make_document(
+    file_name="statusbericht_2026-09.pdf",
+    doc_type=DocType.STATUSBERICHT,
+    media_type="application/pdf",
+    document_date=date(2026, 9, 1),
+)
+
+
+class TestDatumAusInhalt:
+    def test_stand_im_seitenkopf(self) -> None:
+        kopf = "BAU-42 – Wohnquartier Lindenhof · Stand 15.09.2026 · Projektsteuerung"
+        assert date_from_content([seite(kopf)]) == date(2026, 9, 15)
+
+    def test_mit_doppelpunkt(self) -> None:
+        assert date_from_content([seite("Stand: 1.9.2026")]) == date(2026, 9, 1)
+
+    def test_sachstand_und_standsicherheit_zaehlen_nicht(self) -> None:
+        texte = [
+            "Sachstand / Beschluss: Antrag ruht.",
+            "Der Standsicherheitsnachweis wurde geprüft.",
+            "Sachstand 12.09.2026 unverändert.",
+        ]
+        assert date_from_content([seite(t, i) for i, t in enumerate(texte)]) is None
+
+    def test_ungueltiges_datum_wird_uebersprungen(self) -> None:
+        segmente = [seite("Stand 31.02.2026"), seite("Stand 28.02.2026", 1)]
+        assert date_from_content(segmente) == date(2026, 2, 28)
+
+    def test_erster_stand_gilt(self) -> None:
+        segmente = [seite("Stand 15.09.2026"), seite("Stand 01.10.2026", 1)]
+        assert date_from_content(segmente) == date(2026, 9, 15)
+
+
+class TestDokumentdatum:
+    def test_monat_im_namen_wird_durch_stand_ersetzt(self) -> None:
+        dokument = with_content_date(
+            STATUSBERICHT, "statusbericht_2026-09.pdf", [seite("Stand 15.09.2026")]
+        )
+        assert dokument.document_date == date(2026, 9, 15)
+        assert (
+            dokument.document_id == STATUSBERICHT.document_id
+        )  # Identität unverändert
+
+    def test_vollstaendiges_datum_im_namen_gewinnt(self) -> None:
+        """Ein „Stand“ im Text eines Protokolls kann etwas anderes datieren."""
+        dokument = with_content_date(
+            STATUSBERICHT, "2026-09-08_baubesprechung.docx", [seite("Stand 01.09.2026")]
+        )
+        assert dokument.document_date == STATUSBERICHT.document_date
+
+    def test_ohne_stand_bleibt_das_datum_aus_dem_namen(self) -> None:
+        dokument = with_content_date(
+            STATUSBERICHT, "statusbericht_2026-09.pdf", [seite("Kein Stichtag.")]
+        )
+        assert dokument.document_date == date(2026, 9, 1)
+
+    def test_datum_landet_in_den_chunks(self, raw_dir: Path, parquet_dir: Path) -> None:
+        """Ende zu Ende: Der Terminplan-Kopf trägt „Stand“, sein Dateiname kein Datum."""
+        ingest(raw_dir=raw_dir, parquet_dir=parquet_dir)
+        chunks = lies(parquet_dir, "chunks").filter(
+            pl.col("file_name") == "bauzeitenplan.xlsx"
+        )
+        assert set(chunks["document_date"]) == {date(2026, 9, 15)}

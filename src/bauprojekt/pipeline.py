@@ -48,6 +48,11 @@ DOC_TYPE_BY_FOLDER = {
 
 DATE_PATTERN = re.compile(r"(?P<year>20\d{2})-(?P<month>\d{2})(?:-(?P<day>\d{2}))?")
 
+STAND_PATTERN = re.compile(
+    r"\bStand:?\s+(?P<day>\d{1,2})\.(?P<month>\d{1,2})\.(?P<year>20\d{2})\b"
+)
+"""„Stand 15.09.2026“. ``\\b`` vorn schließt „Sachstand“ aus, die Ziffern danach „Standsicherheit“."""
+
 TABLES: dict[str, type[Document | Segment | Chunk]] = {
     "documents": Document,
     "segments": Segment,
@@ -110,6 +115,7 @@ def ingest(
             continue
 
         document_segments = extract(document, path.read_bytes())
+        document = with_content_date(document, path.name, document_segments)
         documents.append(document)
         segments.extend(document_segments)
         chunks.extend(chunk_segments(document, document_segments))
@@ -179,14 +185,51 @@ def doc_type_for(relative: Path) -> DocType:
 def date_from_name(file_name: str) -> date | None:
     """Datum aus dem Dateinamen lesen (``2026-09-15`` oder ``2026-09``).
 
-    Bewusst einfach: Ein Monat ohne Tag wird auf den Monatsersten gesetzt. Das inhaltlich
-    genauere Datum („Stand 15.09.2026“) steht im Dokument selbst und wäre eine eigene
-    Auswertung – für die zeitliche Reihenfolge reicht der Dateiname.
+    Ein Monat ohne Tag wird auf den Monatsersten gesetzt. Genauer wird es erst mit dem
+    Inhalt, siehe ``with_content_date``.
     """
     match = DATE_PATTERN.search(file_name)
     if not match:
         return None
     return date(int(match["year"]), int(match["month"]), int(match["day"] or 1))
+
+
+def with_content_date(
+    document: Document, file_name: str, segments: list[Segment]
+) -> Document:
+    """Das Datum nachschärfen, wenn der Dateiname keinen Tag nennt.
+
+    Reihenfolge:
+
+    1. **Vollständiges Datum im Dateinamen** (``2026-09-15_…``) – eindeutig. Ein „Stand“
+       im Text eines Protokolls könnte dagegen etwas anderes datieren.
+    2. **Erster „Stand TT.MM.JJJJ“ im Inhalt** – der Stichtag von Statusberichten und
+       Terminplänen. Ohne diese Regel galt ``statusbericht_2026-09.pdf`` als vom 01.09.,
+       obwohl sein Stand der 15.09. ist; in einer zeitlichen Reihenfolge sah er damit
+       älter aus als das Protokoll vom 08.09.
+    3. Sonst bleibt es beim Datum aus ``date_from_name`` (Monatserster oder keins).
+
+    Das Datum ist nicht Teil der ``document_id`` – die Identität der Version bleibt gleich.
+    """
+    match = DATE_PATTERN.search(file_name)
+    if match and match["day"]:
+        return document
+    stand = date_from_content(segments)
+    if stand is None:
+        return document
+    return document.model_copy(update={"document_date": stand})
+
+
+def date_from_content(segments: list[Segment]) -> date | None:
+    """Erster Stichtag der Form „Stand 15.09.2026“ (auch „Stand: 15.09.2026“)."""
+    for segment in segments:
+        if match := STAND_PATTERN.search(segment.text):
+            day, month, year = (int(match[group]) for group in ("day", "month", "year"))
+            try:
+                return date(year, month, day)
+            except ValueError:
+                continue  # z. B. „Stand 31.02.2026“ – kein Datum, weitersuchen
+    return None
 
 
 def read_table(parquet_dir: Path, name: str) -> pl.DataFrame:
