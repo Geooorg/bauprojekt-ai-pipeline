@@ -144,6 +144,76 @@ uv run python scripts/evaluate_search.py --k 10 --details
 
 Gemessen wird der Recall@k je Frage, getrennt für Vektor-, Volltext- und Hybrid-Suche. Das ist der Maßstab für jede Änderung an Chunking, Modell oder Suche: erst messen, dann ändern, dann wieder messen.
 
+## Risikobericht (Phase 3)
+
+Voraussetzung: Die Chunks sind eingebettet (siehe oben), und ein Sprachmodell ist erreichbar, per API-Schlüssel oder [lokal](#sprachmodell-lokal-phase-3).
+
+```bash
+uv run python scripts/create_report.py BAU-42                                    # Vorgabe: BAUPROJEKT_LLM_MODEL
+uv run python scripts/create_report.py BAU-42 --modell ollama:qwen3.8:27b-q4_K_M
+```
+
+Ablauf:
+1. Je Risikokategorie eine Suchfrage stellen.
+2. Die Treffer (BAU-42: 41 von 46 Chunks) in **einem** Aufruf an das Modell geben.
+3. Jeden Beleg prüfen. Ein Beleg ist gültig, wenn die Quelle geliefert wurde, zum Projekt gehört und der Auszug wörtlich darin steht. Bei Fehlern bessert das Modell nach. Klappt das nicht, gibt es **keinen** Bericht.
+
+Ergebnis in `data/generated/<PROJEKT>/`: `risikobericht_<zeit>_<modell>.md` zum Lesen und dieselbe Datei als `.json` zum Bewerten.
+
+Berichte gegen die bekannte Wahrheit bewerten, auch mehrere nebeneinander, etwa lokales Modell gegen Claude:
+
+```bash
+uv run python scripts/evaluate_report.py data/generated/BAU-42/*.json
+uv run python scripts/evaluate_report.py data/generated/BAU-42/*.json --details
+```
+
+Die Bewertung prüft:
+- Sachverhalte S1–S6,
+- Zusammenhänge (Ursachenketten, Frist-Folgerung, Entwicklung über die Zeit, Schätzung als Unsicherheit),
+- Ablenker,
+- Projekttrennung,
+- Kennzahlen: Nachbesserungen, Tokens, Laufzeit.
+
+Die Regeln stehen in [scripts/report_cases.py](scripts/report_cases.py). Sie vergleichen Begriffe, der Maßstab ist also grob. Bei „✗“ mit `--details` von Hand nachsehen.
+
+## Sprachmodell lokal (Phase 3)
+
+Der Risikobericht braucht ein Sprachmodell. Welches, legt `BAUPROJEKT_LLM_MODEL` fest (Format `anbieter:modell`, siehe [Konfiguration](#konfiguration)). Für die Entwicklung läuft ein lokales Modell über **Ollama, nativ auf dem Mac**, nicht als Container. Warum, steht in [CLAUDE.md](CLAUDE.md#sprachmodell-als-eigener-dienst).
+
+**Port 11435 statt 11434:** Auf 11434 läuft auf diesem Rechner bereits ein Ollama-Container aus einem anderen Projekt (`cockpit-ollama-1`), und zwar ohne GPU. Das native Ollama bekommt deshalb 11435. Jeder `ollama`-Befehl braucht dann `OLLAMA_HOST`, sonst spricht das CLI mit dem Container und lädt das Modell **in dessen Verzeichnis**.
+
+Terminal 1 – Server starten und laufen lassen:
+
+```bash
+OLLAMA_HOST=127.0.0.1:11435 OLLAMA_CONTEXT_LENGTH=32768 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 ollama serve
+```
+
+Terminal 2 – Modell laden (18 GB, einmalig):
+
+```bash
+OLLAMA_HOST=127.0.0.1:11435 ollama pull qwen3.8:27b-q4_K_M
+```
+
+Bericht mit dem lokalen Modell erzeugen:
+
+```bash
+export OLLAMA_BASE_URL=http://127.0.0.1:11435/v1
+uv run python scripts/create_report.py BAU-42 --modell ollama:qwen3.8:27b-q4_K_M
+```
+
+**Wo die Modelle liegen:**
+
+| Ollama | Speicherort | Änderbar über |
+|---|---|---|
+| nativ (dieses Projekt) | `~/.ollama/models` | `OLLAMA_MODELS` beim Start von `ollama serve` |
+| Container `cockpit-ollama-1` | `~/Projekte/privat/vaadin/cockpit/data/ollama` (Bind-Mount) | Compose-Datei des anderen Projekts |
+
+Beide Verzeichnisse sind getrennt. Ein Modell, das im Container liegt, muss für das native Ollama noch einmal geladen werden. Modelle gehören **nicht** nach `data/`, denn dort liegen nur Projektdaten.
+
+**`OLLAMA_CONTEXT_LENGTH` ist Pflicht.** Ohne diese Variable kürzt Ollama zu lange Eingaben **ohne Fehlermeldung**. Der Bericht sähe dann plausibel aus, beruhte aber nur auf einem Teil der Quellen. Die Eingabe für BAU-42 umfasst rund 7.000 Tokens, bei echten Projekten bis ~25.000. 32.768 reicht für beides. Ob gekürzt wurde, zeigt das Log von `ollama serve`.
+
+`OLLAMA_FLASH_ATTENTION` und `OLLAMA_KV_CACHE_TYPE=q8_0` halbieren ungefähr den Speicher für den Kontext. Sie sind optional.
+
 ## Tests
 
 ```bash
@@ -179,6 +249,10 @@ Alle Werte stehen in [src/bauprojekt/config.py](src/bauprojekt/config.py) und la
 | `BAUPROJEKT_EMBEDDING_MODEL` | `intfloat/multilingual-e5-base` | Embedding-Modell (ca. 1,1 GB beim ersten Laden) |
 | `BAUPROJEKT_EMBEDDING_DIM` | `768` | Muss zum Modell **und** zur Spalte `vector(n)` passen |
 | `BAUPROJEKT_TEXT_SEARCH_CONFIG` | `german` | Konfiguration der Volltextsuche in Postgres |
+| `BAUPROJEKT_LLM_MODEL` | `anthropic:claude-opus-5` | Sprachmodell für den Risikobericht, z. B. `ollama:qwen3.8:27b-q4_K_M` |
+| `BAUPROJEKT_LLM_RETRIES` | `2` | Nachbesserungen bei ungültigen Belegen, danach Abbruch |
+| `OLLAMA_BASE_URL` | – | Pflicht für `ollama:`-Modelle, hier `http://127.0.0.1:11435/v1` |
+| `ANTHROPIC_API_KEY` | – | Pflicht für `anthropic:`-Modelle; nie ins Repository |
 
 Ein Wechsel des Embedding-Modells erzwingt neue Embeddings für alle Chunks und in der Regel ein neues Tabellenschema.
 

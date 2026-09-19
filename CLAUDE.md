@@ -46,6 +46,21 @@ Leitplanken, die immer gelten:
 
 Die Architektur ist das Ziel, nicht der Startpunkt. RabbitMQ, MinIO und die Aufteilung in getrennte Worker kommen erst dazu, wenn die jeweilige Phase lokal funktioniert.
 
+### Sprachmodell als eigener Dienst
+
+Entschieden am 19.09.2026, Phase 3.
+
+- **Das LLM ist ein eigener Dienst hinter einer HTTP-Schnittstelle.** Es läuft nicht in unseren Python-Prozessen oder -Containern. Der Code kennt nur `BAUPROJEKT_LLM_MODEL` (`anbieter:modell`) und bei lokalen Modellen die Basis-URL. Der Anbieter wechselt per Konfiguration, nicht per Code.
+- **Abstraktion: Pydantic AI** (`pydantic-ai-slim` mit den Extras der genutzten Anbieter). Ausgabe als Pydantic-Modell (`risks.py`). Tests ohne Netz über `TestModel` und `FunctionModel`.
+- **Quellen prüft der Code, nicht der Anbieter.** Das Modell nennt `chunk_id` und wörtlichen Auszug, `report.check_sources` prüft beides. Anbieterspezifische Zitierfunktionen werden nicht genutzt. Deshalb kostet die Abstraktion hier nichts.
+- **Entwicklung (Mac): Ollama nativ, nicht im Container.**
+  - Podman-Container laufen in einer Linux-VM (`applehv`, 8 GiB) ohne Zugriff auf die Metal-GPU. Ein Modell liefe dort nur auf der CPU und passte nicht in den Speicher.
+  - Natives Ollama läuft auf Port **11435**, weil 11434 von einem fremden Container (`cockpit-ollama-1`) belegt ist.
+  - Einrichtung und Speicherorte: [README.md](README.md#sprachmodell-lokal-phase-3).
+- **Produktion (Linux mit NVIDIA): LLM als Container ist der Normalfall.** Etwa vLLM mit GPU über das NVIDIA Container Toolkit bzw. in Kubernetes über den GPU Operator. Die Schnittstelle bleibt gleich (OpenAI-kompatibel).
+- **Kein LLM-Dienst in `infra/docker-compose.yml`.**
+- **Modelle werden anhand der bekannten Wahrheit ([docs/testdaten.md](docs/testdaten.md)) verglichen**, mit `scripts/evaluate_report.py`, nicht nach Eindruck.
+
 ## Phasen
 
 Arbeite phasenweise. Beginne keine neue Phase, bevor das Ergebnis der aktuellen erreicht und getestet ist.
