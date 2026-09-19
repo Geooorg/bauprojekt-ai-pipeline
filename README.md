@@ -276,7 +276,7 @@ src/bauprojekt/
 
 Der Datenfluss: `data/raw` → `extraction` → `chunking` → `data/parquet` → `embeddings` → PostgreSQL → `search`.
 
-Sequenzdiagramme (PlantUML): [docs/diagrams/pipeline.puml](docs/diagrams/pipeline.puml) für Einlesen und Einbetten, [docs/diagrams/search.puml](docs/diagrams/search.puml) für die Hybrid-Suche.
+Sequenzdiagramme (PlantUML): [docs/diagrams/pipeline.puml](docs/diagrams/pipeline.puml) für Einlesen und Einbetten, [docs/diagrams/search.puml](docs/diagrams/search.puml) für die Hybrid-Suche, [docs/diagrams/report.puml](docs/diagrams/report.puml) für den Risikobericht mit Prüfung und Nachbesserung.
 
 Zwei Regeln erklären die meisten Entwurfsentscheidungen:
 

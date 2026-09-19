@@ -51,7 +51,7 @@ ingest -> raw : discover(): *.pdf, *.docx, *.xlsx
 raw --> ingest : Pfade (sortiert)
 
 loop für jede Datei
-  ingest -> ingest : build_document()\n• project_id  = 1. Ordner (BAU-42)\n• doc_type    = Unterordner (protokolle → PROTOKOLL)\n• document_date = Datum im Dateinamen
+  ingest -> ingest : build_document()\n• project_id  = 1. Ordner (BAU-42)\n• doc_type    = Unterordner (protokolle → PROTOKOLL)\n• document_date = Datum im Dateinamen (vorläufig)
   ingest -> model : Document.from_file(path, …)
   model -> raw : hash_file(): SHA-256 des Inhalts
   model --> ingest : Document\ndocument_id = derive_id(Projekt, Pfad, Hash)
@@ -74,6 +74,14 @@ loop für jede Datei
       Tabellenzeilen als "Spalte: Wert"
     end note
     extract --> ingest : list[Segment]
+    ingest -> ingest : with_content_date(document, name, segments)
+    note right of ingest
+      Nennt der Dateiname keinen Tag
+      (statusbericht_2026-09.pdf, bauzeitenplan.xlsx),
+      gilt der erste „Stand TT.MM.JJJJ“ im Inhalt.
+      Ein vollständiges Datum im Namen gewinnt.
+      Nicht Teil der document_id.
+    end note
     ingest -> chunking : chunk_segments(document, segments)
     note right of chunking
       Reine Funktion:

@@ -1,0 +1,128 @@
+@startuml report
+' Risikobericht (Phase 3): Belege suchen, Sprachmodell aufrufen, Antwort prüfen, nachbessern.
+' Funktionsnamen entsprechen src/bauprojekt/report.py, risks.py, report_markdown.py.
+' Anzeige: IntelliJ-Plugin "PlantUML Integration" oder: plantuml -tsvg docs/diagrams/report.puml
+
+title Risikobericht: Suche → Sprachmodell → Prüfung → Nachbesserung
+
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 230
+skinparam BoxPadding 8
+autonumber "<b>00"
+
+actor "Entwickler" as dev
+participant "scripts/\ncreate_report.py" as cli
+
+box "Belege sammeln" #F3F7FB
+  participant "report\n.collect_evidence()" as collect
+  participant "search\n.search()" as search
+  database "PostgreSQL\nTabelle chunks" as pg
+end box
+
+box "Analysieren und prüfen" #F6F3FB
+  participant "report\n.analyze()" as analyze
+  participant "Pydantic AI\nAgent" as agent
+  participant "risks.RiskAnalysis\n(Pydantic-Schema)" as schema
+  participant "report\n.check_sources()" as check
+end box
+
+participant "Sprachmodell\nClaude oder Ollama" as llm
+
+participant "report_markdown\n.render_markdown()" as render
+collections "data/generated/\n<PROJEKT>/" as out
+
+dev -> cli : create_report.py BAU-42 [~--modell] [~--denken]
+cli -> cli : load_encoder()
+
+== 1. Belege sammeln (ohne Sprachmodell) ==
+
+cli -> collect : collect_evidence(connection, project_id="BAU-42", encoder)
+loop 10 Fragen: je Risikokategorie eine, dazu eine übergreifende
+  collect -> search : search(project_id, frage, limit=16)
+  search -> pg : Hybrid-Suche, nur project_id = 'BAU-42'\n(Ablauf: search.puml)
+  pg --> search : Treffer
+  search --> collect : list[SearchHit]
+end
+collect -> collect : Dubletten entfernen,\nchronologisch sortieren (document_date)
+collect --> cli : list[Chunk] (BAU-42: 41 von 46)
+cli -> pg : Verbindung schließen
+note right of cli
+  Vor dem Modellaufruf geschlossen:
+  Der Aufruf dauert Minuten.
+end note
+
+== 2. Analysieren: ein Aufruf für den ganzen Bericht ==
+
+cli -> analyze : analyze(chunks, project_id, model, thinking)
+analyze -> analyze : Chunks aus fremdem Projekt? → ValueError\nkeine Chunks? → leerer Bericht, kein Aufruf
+analyze -> analyze : format_sources()\n<quelle id=… datei=… stelle=… datum=…>
+analyze -> agent : build_agent(model, thinking)\n.run_sync(prompt, deps=Sources)
+note right of agent
+  output_spec(): Ollama → NativeOutput
+  (Grammatik erzwingt gültiges JSON),
+  sonst Tool-Aufruf.
+  model_settings(): timeout, max_tokens,
+  Denkstufe (Ollama: reasoning_effort)
+end note
+
+loop bis die Antwort gültig ist – höchstens 1 + LLM_RETRIES (= 3) Anfragen
+  agent -> llm : Anweisungen + 41 Quellen + JSON-Schema\n(ab der 2. Anfrage zusätzlich: eigene Antwort + Fehlerliste)
+  note right of llm
+    Kein Gedächtnis zwischen Aufrufen:
+    Jede Anfrage enthält den ganzen Verlauf.
+    Das Modell prüft sich nicht selbst –
+    es liest nur die Rückmeldung.
+  end note
+  llm --> agent : RiskAnalysis als JSON
+
+  agent -> schema : Prüfstufe a: model_validate()
+  alt Schema verletzt (Pflichtfeld fehlt, Wert nicht erlaubt, Fakt ohne Beleg)
+    schema --> agent : ValidationError
+    agent -> agent : RetryPromptPart:\n"N validation errors: … Fix the errors and try again."
+  else Schema erfüllt
+    agent -> check : Prüfstufe b: output_validator\ncheck_sources(analysis, Sources)
+    note right of check
+      Je Beleg:
+      • chunk_id geliefert?
+      • Quelle aus diesem Projekt?
+      • Auszug wörtlich im Chunk?
+        (Leerraum egal, Wörter nicht)
+    end note
+    alt mindestens ein Beleg ungültig
+      check --> agent : raise ModelRetry(\n"Einige Belege sind ungültig … Risiko „…“, Fakt „…“: …")
+      agent -> agent : RetryPromptPart mit unserer Fehlerliste
+    else alle Belege gültig
+      check --> agent : analysis
+    end
+  end
+end
+
+alt nach 3 Anfragen immer noch ungültig
+  agent --> analyze : UnexpectedModelBehavior
+  analyze --> cli : Ausnahme
+  cli --> dev : "Abgebrochen, kein Bericht" (Exit-Code 1)
+  note right of cli
+    Kein Bericht ist besser
+    als ein falsch belegter.
+  end note
+else gültig
+  agent --> analyze : Ergebnis: output, usage, Nachrichtenverlauf
+  analyze -> analyze : RunStats: requests, tokens, Sekunden,\nretries = Anzahl RetryPromptParts im Verlauf
+  analyze -> analyze : sources = nur die zitierten Chunks,\nmit Datei, Stelle, Datum, Version
+  analyze --> cli : RiskReport (project_id, Zeit und Modell setzt der Code)
+
+  == 3. Ausgeben ==
+
+  cli -> render : render_markdown(report)
+  render --> cli : Markdown: Übersicht, je Risiko Fakten [n],\nSchlussfolgerungen, Unsicherheiten, Quellen
+  cli -> out : risikobericht_<zeit>_<modell>.md\nrisikobericht_<zeit>_<modell>.json
+  cli --> dev : "5 Risiken · 41 Textstellen ausgewertet, 17 zitiert ·\n1 Nachbesserungen · … Tokens · 106 s"
+end
+
+note over dev, out
+  Bewertung danach, ohne neuen Modellaufruf:
+  evaluate_report.py liest die .json-Dateien und vergleicht mit docs/testdaten.md.
+end note
+
+@enduml
